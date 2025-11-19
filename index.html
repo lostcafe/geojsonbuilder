@@ -102,6 +102,132 @@
             color: #666;
             font-weight: 500;
         }
+
+        .btn-edit-mode {
+            background: #9C27B0;
+            color: white;
+        }
+
+        .coordinate-editor {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1;
+            max-width: 350px;
+            max-height: 80vh;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .coordinate-editor.active {
+            display: block;
+        }
+
+        .coord-list {
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+
+        .coord-item {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .coord-info {
+            flex: 1;
+            margin-right: 10px;
+        }
+
+        .coord-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .coord-actions button {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .btn-edit-coord {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-delete-coord {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-close-editor {
+            background: #666;
+            color: white;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .edit-form {
+            background: #fff3cd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border: 2px solid #ffc107;
+        }
+
+        .edit-form input {
+            width: 100%;
+            padding: 5px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            box-sizing: border-box;
+        }
+
+        .edit-form button {
+            width: 48%;
+            padding: 8px;
+            margin: 2px 1%;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .btn-save-coord {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-cancel-edit {
+            background: #999;
+            color: white;
+        }
+
+        .selected-line-info {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .selected-line-info strong {
+            color: #1976d2;
+        }
     </style>
 </head>
 <body>
@@ -158,6 +284,24 @@
     
     <button class="btn-save" id="btn-save" onclick="saveToFile()">
         💾 ファイル保存
+    </button>
+
+    <button class="btn-edit-mode" id="btn-edit-mode" onclick="toggleEditMode()">
+        ✏️ 座標編集モード
+    </button>
+</div>
+
+<div class="coordinate-editor" id="coordinate-editor">
+    <h3>📍 座標エディター</h3>
+
+    <div id="selected-line-info" class="selected-line-info">
+        路線を選択してください
+    </div>
+
+    <div id="coord-list" class="coord-list"></div>
+
+    <button class="btn-close-editor" onclick="closeCoordinateEditor()">
+        閉じる
     </button>
 </div>
 
@@ -310,6 +454,10 @@ let isDrawing = false;
 let currentCoordinates = [];
 let rawData = []; // 원본 데이터 저장
 let geojsonData = null; // 변환된 GeoJSON 데이터
+let isEditMode = false; // 좌표 편집 모드
+let selectedLineIndex = null; // 선택된 선로 인덱스
+let selectedMultiLineIndex = 0; // MultiLineString 내 선택된 라인 인덱스
+let editingCoordIndex = null; // 편집 중인 좌표 인덱스
 
 // 색상 찾기 함수
 function getLineColor(label) {
@@ -500,7 +648,7 @@ function saveToFile() {
         alert('保存するデータがありません');
         return;
     }
-    
+
     const dataStr = JSON.stringify(rawData, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -509,8 +657,214 @@ function saveToFile() {
     link.download = 'railway_data_updated.json';
     link.click();
     URL.revokeObjectURL(url);
-    
+
     alert('ファイルを保存しました！');
+}
+
+// 편집 모드 토글
+function toggleEditMode() {
+    if (isDrawing) {
+        alert('描画モードを終了してください');
+        return;
+    }
+
+    isEditMode = !isEditMode;
+
+    if (isEditMode) {
+        document.getElementById('btn-edit-mode').textContent = '🔙 通常モードに戻る';
+        document.getElementById('btn-edit-mode').style.background = '#FF5722';
+        document.getElementById('coordinate-editor').classList.add('active');
+        document.getElementById('status-text').textContent = '地図上の路線をクリックして選択';
+        map.getCanvas().style.cursor = 'pointer';
+    } else {
+        document.getElementById('btn-edit-mode').textContent = '✏️ 座標編集モード';
+        document.getElementById('btn-edit-mode').style.background = '#9C27B0';
+        closeCoordinateEditor();
+    }
+}
+
+// 좌표 에디터 닫기
+function closeCoordinateEditor() {
+    isEditMode = false;
+    selectedLineIndex = null;
+    selectedMultiLineIndex = 0;
+    editingCoordIndex = null;
+    document.getElementById('coordinate-editor').classList.remove('active');
+    document.getElementById('btn-edit-mode').textContent = '✏️ 座標編集モード';
+    document.getElementById('btn-edit-mode').style.background = '#9C27B0';
+    document.getElementById('status-text').textContent = '路線情報を入力して「描画開始」をクリック';
+    map.getCanvas().style.cursor = '';
+}
+
+// 선로 선택하여 편집
+function selectLineForEditing(featureIndex, clickedCoords) {
+    selectedLineIndex = featureIndex;
+    const feature = geojsonData.features[featureIndex];
+    const railway = rawData[featureIndex];
+
+    // MultiLineString의 어느 라인이 선택되었는지 찾기
+    const multiLineCoords = normalizeCoordinates(railway.coordinates);
+    let closestLineIndex = 0;
+    let minDistance = Infinity;
+
+    multiLineCoords.forEach((lineCoords, lineIndex) => {
+        lineCoords.forEach(coord => {
+            const distance = Math.sqrt(
+                Math.pow(coord[0] - clickedCoords[0], 2) +
+                Math.pow(coord[1] - clickedCoords[1], 2)
+            );
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestLineIndex = lineIndex;
+            }
+        });
+    });
+
+    selectedMultiLineIndex = closestLineIndex;
+
+    // 선로 정보 표시
+    const operatorTypeName = operatorTypeMap[railway.N02_002] || railway.N02_002;
+    const railwayTypeName = railwayTypeMap[railway.N02_001] || railway.N02_001;
+
+    document.getElementById('selected-line-info').innerHTML = `
+        <strong>${railway.label}</strong><br>
+        運営会社: ${railway.N02_004}<br>
+        事業者区分: ${operatorTypeName}<br>
+        路線種類: ${railwayTypeName}<br>
+        <small style="color: #666;">ライン ${closestLineIndex + 1}/${multiLineCoords.length}</small>
+    `;
+
+    // 좌표 목록 표시
+    displayCoordinates();
+}
+
+// 좌표 목록 표시
+function displayCoordinates() {
+    const railway = rawData[selectedLineIndex];
+    const multiLineCoords = normalizeCoordinates(railway.coordinates);
+    const coordinates = multiLineCoords[selectedMultiLineIndex];
+
+    const coordListDiv = document.getElementById('coord-list');
+    coordListDiv.innerHTML = '';
+
+    coordinates.forEach((coord, index) => {
+        const coordItem = document.createElement('div');
+        coordItem.className = 'coord-item';
+        coordItem.id = `coord-item-${index}`;
+
+        coordItem.innerHTML = `
+            <div class="coord-info">
+                <strong>#${index + 1}</strong><br>
+                経度: ${coord[0].toFixed(6)}<br>
+                緯度: ${coord[1].toFixed(6)}
+            </div>
+            <div class="coord-actions">
+                <button class="btn-edit-coord" onclick="editCoordinate(${index})">編集</button>
+                <button class="btn-delete-coord" onclick="deleteCoordinate(${index})">削除</button>
+            </div>
+        `;
+
+        coordListDiv.appendChild(coordItem);
+    });
+}
+
+// 좌표 편집
+function editCoordinate(index) {
+    editingCoordIndex = index;
+    const railway = rawData[selectedLineIndex];
+    const multiLineCoords = normalizeCoordinates(railway.coordinates);
+    const coord = multiLineCoords[selectedMultiLineIndex][index];
+
+    const coordItem = document.getElementById(`coord-item-${index}`);
+    coordItem.innerHTML = `
+        <div class="edit-form">
+            <label style="font-size: 12px; font-weight: bold;">座標 #${index + 1} を編集</label>
+            <input type="number" id="edit-lng" step="0.000001" value="${coord[0]}" placeholder="経度">
+            <input type="number" id="edit-lat" step="0.000001" value="${coord[1]}" placeholder="緯度">
+            <div>
+                <button class="btn-save-coord" onclick="saveCoordinateEdit(${index})">保存</button>
+                <button class="btn-cancel-edit" onclick="cancelCoordinateEdit(${index})">キャンセル</button>
+            </div>
+        </div>
+    `;
+}
+
+// 좌표 편집 저장
+function saveCoordinateEdit(index) {
+    const lng = parseFloat(document.getElementById('edit-lng').value);
+    const lat = parseFloat(document.getElementById('edit-lat').value);
+
+    if (isNaN(lng) || isNaN(lat)) {
+        alert('有効な数値を入力してください');
+        return;
+    }
+
+    // rawData 업데이트
+    const railway = rawData[selectedLineIndex];
+    const multiLineCoords = normalizeCoordinates(railway.coordinates);
+    multiLineCoords[selectedMultiLineIndex][index] = [lng, lat];
+
+    // 정규화된 좌표를 다시 저장
+    if (Array.isArray(railway.coordinates[0]) && Array.isArray(railway.coordinates[0][0])) {
+        railway.coordinates = multiLineCoords;
+    } else {
+        railway.coordinates = multiLineCoords[0];
+    }
+
+    // GeoJSON 업데이트
+    geojsonData.features[selectedLineIndex].geometry.coordinates = multiLineCoords;
+
+    // 지도 업데이트
+    map.getSource('railways').setData(geojsonData);
+
+    // 표시 업데이트
+    editingCoordIndex = null;
+    displayCoordinates();
+
+    alert('座標を更新しました！');
+}
+
+// 좌표 편집 취소
+function cancelCoordinateEdit(index) {
+    editingCoordIndex = null;
+    displayCoordinates();
+}
+
+// 좌표 삭제
+function deleteCoordinate(index) {
+    const railway = rawData[selectedLineIndex];
+    const multiLineCoords = normalizeCoordinates(railway.coordinates);
+    const coordinates = multiLineCoords[selectedMultiLineIndex];
+
+    if (coordinates.length <= 2) {
+        alert('路線には最低2つの座標が必要です');
+        return;
+    }
+
+    if (!confirm(`座標 #${index + 1} を削除しますか？`)) {
+        return;
+    }
+
+    // 좌표 삭제
+    coordinates.splice(index, 1);
+
+    // rawData 업데이트
+    if (Array.isArray(railway.coordinates[0]) && Array.isArray(railway.coordinates[0][0])) {
+        railway.coordinates = multiLineCoords;
+    } else {
+        railway.coordinates = multiLineCoords[0];
+    }
+
+    // GeoJSON 업데이트
+    geojsonData.features[selectedLineIndex].geometry.coordinates = multiLineCoords;
+
+    // 지도 업데이트
+    map.getSource('railways').setData(geojsonData);
+
+    // 표시 업데이트
+    displayCoordinates();
+
+    alert('座標を削除しました！');
 }
 
 // 임시 선 업데이트
@@ -606,24 +960,39 @@ map.on('load', async () => {
             }
         });
 
-        // 클릭 이벤트 - 그리기 모드와 일반 모드 구분
+        // 클릭 이벤트 - 그리기 모드, 편집 모드, 일반 모드 구분
         map.on('click', (e) => {
             if (isDrawing) {
                 // 그리기 모드: 좌표 추가
                 currentCoordinates.push([e.lngLat.lng, e.lngLat.lat]);
                 document.getElementById('coord-count').textContent = `座標数: ${currentCoordinates.length}`;
                 updateTempLine();
+            } else if (isEditMode) {
+                // 편집 모드: 선로 선택
+                const features = map.queryRenderedFeatures(e.point, {
+                    layers: ['railway-lines']
+                });
+
+                if (features.length > 0) {
+                    // 선택된 feature의 인덱스 찾기
+                    const clickedLabel = features[0].properties.label;
+                    const featureIndex = geojsonData.features.findIndex(f => f.properties.label === clickedLabel);
+
+                    if (featureIndex !== -1) {
+                        selectLineForEditing(featureIndex, [e.lngLat.lng, e.lngLat.lat]);
+                    }
+                }
             } else {
                 // 일반 모드: 선로 정보 표시
                 const features = map.queryRenderedFeatures(e.point, {
                     layers: ['railway-lines']
                 });
-                
+
                 if (features.length > 0) {
                     const properties = features[0].properties;
                     const operatorTypeName = operatorTypeMap[properties.operatorType] || properties.operatorType;
                     const railwayTypeName = railwayTypeMap[properties.railwayType] || properties.railwayType;
-                    
+
                     new mapboxgl.Popup()
                         .setLngLat(e.lngLat)
                         .setHTML(`
