@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Railway Map Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.css' rel='stylesheet' />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        
+        .editor-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1;
+            max-width: 300px;
+        }
+        
+        .editor-panel h3 {
+            margin-top: 0;
+            font-size: 16px;
+            color: #333;
+        }
+        
+        .editor-panel input, .editor-panel select {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .editor-panel button {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .btn-start {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .btn-finish {
+            background: #2196F3;
+            color: white;
+        }
+        
+        .btn-cancel {
+            background: #f44336;
+            color: white;
+        }
+        
+        .btn-save {
+            background: #FF9800;
+            color: white;
+        }
+        
+        .btn-disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .info-text {
+            font-size: 12px;
+            color: #666;
+            margin: 10px 0;
+        }
+        
+        .coordinates-count {
+            font-size: 14px;
+            color: #2196F3;
+            font-weight: bold;
+        }
+        
+        .mapboxgl-popup-content {
+            padding: 15px;
+            min-width: 200px;
+        }
+        .popup-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        .popup-row {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .popup-label {
+            color: #666;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+<div id='map'></div>
+
+<div class="editor-panel">
+    <h3>🚆 路線エディター</h3>
+    
+    <div id="input-section">
+        <input type="text" id="line-name" placeholder="路線名 (例: 山手線)">
+        <input type="text" id="operator-name" placeholder="運営会社 (例: 東日本旅客鉄道)">
+        
+        <select id="operator-type">
+            <option value="">事業者区分を選択</option>
+            <option value="1">JR新幹線</option>
+            <option value="2">JR在来線</option>
+            <option value="3">公営鉄道</option>
+            <option value="4">民営鉄道</option>
+            <option value="5">第三セクター</option>
+        </select>
+        
+        <select id="railway-type">
+            <option value="">路線種類を選択</option>
+            <option value="11">JR</option>
+            <option value="12">普通鉄道</option>
+            <option value="21">軌道</option>
+            <option value="22">懸垂式モノレール</option>
+            <option value="23">跨座式モノレール</option>
+        </select>
+        
+        <input type="color" id="line-color" value="#0066ff">
+        <label for="line-color" style="font-size: 12px;">路線カラー</label>
+    </div>
+    
+    <div class="info-text" id="status-text">
+        路線情報を入力して「描画開始」をクリック
+    </div>
+    
+    <div class="coordinates-count" id="coord-count">
+        座標数: 0
+    </div>
+    
+    <button class="btn-start" id="btn-start" onclick="startDrawing()">
+        📍 描画開始
+    </button>
+    
+    <button class="btn-finish btn-disabled" id="btn-finish" onclick="finishDrawing()" disabled>
+        ✓ 路線完成
+    </button>
+    
+    <button class="btn-cancel btn-disabled" id="btn-cancel" onclick="cancelDrawing()" disabled>
+        ✕ キャンセル
+    </button>
+    
+    <button class="btn-save" id="btn-save" onclick="saveToFile()">
+        💾 ファイル保存
+    </button>
+</div>
+
+<script>
+// Mapbox 액세스 토큰 설정
+mapboxgl.accessToken = 'pk.eyJ1IjoibG9zdGNhZmUwIiwiYSI6ImNsMnBoOHpyMTAyMzczY254MmthZG1rOWEifQ.p_Xuk6AkxC7C9W4CPBwrjA';
+
+// 선로 색상 매핑
+const lineColorMap = {
+    "小田原線": "#0085CE",
+    "江ノ島線": "#0085CE",
+    "多摩線": "#0085CE",
+    "多摩モノレール": "#286460",
+    "ブルーライン": "#0070C0",
+    "グリーンライン": "#00B050",
+    "秋田新幹線": "#ED4399",
+    "左沢線": "#0073BF",
+    "磐越東線": "#C71585",
+    "磐越西線": "#CB7B35",
+    "丸ノ内線": "#F62E36",
+    "千代田線": "#00BB85",
+    "南北線": "#00AC9B",
+    "副都心線": "#9C5E31",
+    "銀座線": "#FF9500",
+    "半蔵門線": "#8F76D6",
+    "日比谷線": "#B5B5AC",
+    "東西線": "#009BBF",
+    "有楽町線": "#C1A470",
+    "丸ノ内線支線": "#F62E36",
+    "中央・総武各駅停車": "#FFE500",
+    "中央本線": "#0071C5",
+    "常磐線": "#0071C5",
+    "吾妻線": "#008689",
+    "中央線快速": "#EB5C01",
+    "八高線": "#A09D95",
+    "伊東線": "#FF9845",
+    "川越線(川越-高麗川間)": "#A6A9AB",
+    "五日市線": "#EB5C01",
+    "常磐線各駅停車": "#9E9E9F",
+    "常磐線快速": "#00C18A",
+    "上越線": "#00ACD1",
+    "鹿島線": "#A85F12",
+    "京浜東北線・根岸線": "#00A7E3",
+    "京葉線": "#CF1225",
+    "久留里線": "#00C3A7",
+    "成田線": "#00BB85",
+    "武蔵野線": "#EB5C01",
+    "南武線浜川崎支線": "#FFE400",
+    "南武線": "#FFE400",
+    "成田線我孫子支線": "#00BB85",
+    "成田線空港支線": "#00BB85",
+    "青梅線": "#EB5C01",
+    "相模線": "#008689",
+    "埼京線・川越線": "#00AC84",
+    "湘南新宿ライン": "#DE0515",
+    "総武快速線": "#0074BE",
+    "総武本線": "#FDD700",
+    "相鉄直通線": "#00C3A7",
+    "外房線": "#F22335",
+    "高崎線": "#FF9845",
+    "東金線": "#B31C31",
+    "東海道線": "#FF9845",
+    "鶴見線大川支線": "#FFE500",
+    "鶴見線海芝浦支線": "#FFE500",
+    "鶴見線": "#FFE500",
+    "内房線": "#0071C5",
+    "宇都宮線": "#FF9845",
+    "山手線": "#85C023",
+    "横浜線": "#85C023",
+    "横須賀線": "#0074BE",
+    "浅草線": "#FF535F",
+    "三田線": "#0067B0",
+    "大江戸線": "#CF3366",
+    "新宿線": "#9FB01C",
+    "日光線": "#F5A302",
+    "東武スカイツリーライン": "#226BB8",
+    "大師線": "#226BB8",
+    "伊勢崎線": "#E62119",
+    "桐生線": "#E62119",
+    "亀戸線": "#226BB8",
+    "鬼怒川線": "#F5A302",
+    "ゆりかもめ": "#0065A6",
+    "小泉線(東小泉-太田)": "#E62119",
+    "小泉線": "#E62119",
+    "越生線": "#10428B",
+    "佐野線": "#E62119",
+    "東武スカイツリーライン(押上-曳舟)": "#226BB8",
+    "東武アーバンパークライン": "#41B3E5",
+    "東上線": "#10428B",
+    "宇都宮線": "#F5A302",
+    "京急本線": "#0DB0E9",
+    "空港線": "#0DB0E9",
+    "大師線": "#0DB0E9",
+    "久里浜線": "#0DB0E9",
+    "逗子線": "#0DB0E9",
+    "りんかい線": "#222D65",
+    "東急多摩川線": "#AE0379",
+    "東横線": "#DB0442",
+    "豊島線": "#FF710A",
+    "いずみ野線": "#0073BC",
+    "相鉄本線": "#0073BC",
+    "相鉄新横浜線": "#0073BC",
+    "拝島線": "#00A8B5",
+    "池袋線": "#FF710A",
+    "国分寺線": "#00A943",
+    "狭山線": "#FF710A",
+    "西武秩父線": "#FF710A",
+    "西武有楽町線": "#FF710A",
+    "西武園線": "#00A943",
+    "新宿線": "#00A8B5",
+    "多摩川線": "#FF710A",
+    "田園都市線": "#00AA8E",
+    "池上線": "#EE86A7",
+    "世田谷線": "#FCC80D",
+    "こどもの国線": "#0071BE",
+    "目黒線": "#009CD3",
+    "大井町線": "#F18C43",
+    "東急新横浜線": "#890D84",
+    "多摩湖線": "#FFA600",
+    "山口線": "#FF565D"
+};
+
+// 사업자 구분 코드 매핑
+const operatorTypeMap = {
+    "1": "JR新幹線", 
+    "2": "JR在来線", 
+    "3": "公営鉄道", 
+    "4": "民営鉄道", 
+    "5": "第三セクター" 
+};
+
+// 노선 종류 구분 코드 매핑
+const railwayTypeMap = { 
+    "11": "JR", 
+    "12": "普通鉄道", 
+    "13": "鋼索鉄道", 
+    "14": "懸垂式鉄道", 
+    "15": "跨座式鉄道", 
+    "16": "案内軌条式鉄道", 
+    "17": "無軌条鉄道", 
+    "21": "軌道", 
+    "22": "懸垂式モノレール", 
+    "23": "跨座式モノレール", 
+    "24": "案内軌条式", 
+    "25": "浮上式" 
+};
+
+// 편집 상태 관리
+let isDrawing = false;
+let currentCoordinates = [];
+let rawData = []; // 원본 데이터 저장
+let geojsonData = null; // 변환된 GeoJSON 데이터
+
+// 색상 찾기 함수
+function getLineColor(label) {
+    if (lineColorMap[label]) {
+        return lineColorMap[label];
+    }
+    if (label.startsWith('JR')) {
+        const labelWithoutJR = label.substring(2);
+        if (lineColorMap[labelWithoutJR]) {
+            return lineColorMap[labelWithoutJR];
+        }
+    }
+    return '#0066ff';
+}
+
+// 좌표 정규화 함수
+function normalizeCoordinates(coords) {
+    if (Array.isArray(coords[0]) && Array.isArray(coords[0][0])) {
+        return coords;
+    } else {
+        return [coords];
+    }
+}
+
+// GeoJSON 파일 로드 및 변환
+async function loadAndConvertGeoJSON(url) {
+    const response = await fetch(url);
+    const data = await response.json();
+    rawData = data; // 원본 데이터 저장
+    
+    return {
+        'type': 'FeatureCollection',
+        'features': data.map(railway => ({
+            'type': 'Feature',
+            'properties': {
+                'label': railway.label,
+                'operator': railway.N02_004,
+                'operatorType': railway.N02_002,
+                'railwayType': railway.N02_001,
+                'color': getLineColor(railway.label)
+            },
+            'geometry': {
+                'type': 'MultiLineString',
+                'coordinates': normalizeCoordinates(railway.coordinates)
+            }
+        }))
+    };
+}
+
+// 맵 초기화
+const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/lostcafe0/cmgyogzdq007201r59ni6b9fd',
+    center: [135, 35],
+    zoom: 5
+});
+
+// 그리기 시작
+function startDrawing() {
+    const lineName = document.getElementById('line-name').value;
+    const operatorName = document.getElementById('operator-name').value;
+    const operatorType = document.getElementById('operator-type').value;
+    const railwayType = document.getElementById('railway-type').value;
+    
+    if (!lineName || !operatorName || !operatorType || !railwayType) {
+        alert('すべての情報を入力してください');
+        return;
+    }
+    
+    isDrawing = true;
+    currentCoordinates = [];
+    
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-start').classList.add('btn-disabled');
+    document.getElementById('btn-finish').disabled = false;
+    document.getElementById('btn-finish').classList.remove('btn-disabled');
+    document.getElementById('btn-cancel').disabled = false;
+    document.getElementById('btn-cancel').classList.remove('btn-disabled');
+    document.getElementById('input-section').style.opacity = '0.5';
+    document.getElementById('status-text').textContent = '地図をクリックして座標を追加';
+    
+    map.getCanvas().style.cursor = 'crosshair';
+}
+
+// 그리기 완료
+function finishDrawing() {
+    if (currentCoordinates.length < 2) {
+        alert('最低2つの座標が必要です');
+        return;
+    }
+    
+    const lineName = document.getElementById('line-name').value;
+    const operatorName = document.getElementById('operator-name').value;
+    const operatorType = document.getElementById('operator-type').value;
+    const railwayType = document.getElementById('railway-type').value;
+    const lineColor = document.getElementById('line-color').value;
+    
+    // 원본 데이터에 추가
+    const newRailway = {
+        label: lineName,
+        N02_004: operatorName,
+        N02_002: operatorType,
+        N02_001: railwayType,
+        coordinates: currentCoordinates
+    };
+    
+    rawData.push(newRailway);
+    
+    // GeoJSON에 추가
+    const newFeature = {
+        'type': 'Feature',
+        'properties': {
+            'label': lineName,
+            'operator': operatorName,
+            'operatorType': operatorType,
+            'railwayType': railwayType,
+            'color': lineColor
+        },
+        'geometry': {
+            'type': 'MultiLineString',
+            'coordinates': [currentCoordinates]
+        }
+    };
+    
+    geojsonData.features.push(newFeature);
+    
+    // 지도 업데이트
+    map.getSource('railways').setData(geojsonData);
+    
+    // 상태 리셋
+    resetDrawing();
+    
+    alert(`路線「${lineName}」を追加しました！\n座標数: ${currentCoordinates.length}`);
+}
+
+// 그리기 취소
+function cancelDrawing() {
+    if (currentCoordinates.length > 0) {
+        if (!confirm('描画中のデータを破棄しますか？')) {
+            return;
+        }
+    }
+    
+    // 임시 레이어 제거
+    if (map.getLayer('temp-line')) {
+        map.removeLayer('temp-line');
+        map.removeSource('temp-line');
+    }
+    if (map.getLayer('temp-points')) {
+        map.removeLayer('temp-points');
+        map.removeSource('temp-points');
+    }
+    
+    resetDrawing();
+}
+
+// 상태 리셋
+function resetDrawing() {
+    isDrawing = false;
+    currentCoordinates = [];
+    
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-start').classList.remove('btn-disabled');
+    document.getElementById('btn-finish').disabled = true;
+    document.getElementById('btn-finish').classList.add('btn-disabled');
+    document.getElementById('btn-cancel').disabled = true;
+    document.getElementById('btn-cancel').classList.add('btn-disabled');
+    document.getElementById('input-section').style.opacity = '1';
+    document.getElementById('status-text').textContent = '路線情報を入力して「描画開始」をクリック';
+    document.getElementById('coord-count').textContent = '座標数: 0';
+    
+    map.getCanvas().style.cursor = '';
+    
+    // 임시 레이어 제거
+    if (map.getLayer('temp-line')) {
+        map.removeLayer('temp-line');
+        map.removeSource('temp-line');
+    }
+    if (map.getLayer('temp-points')) {
+        map.removeLayer('temp-points');
+        map.removeSource('temp-points');
+    }
+}
+
+// 파일로 저장
+function saveToFile() {
+    if (rawData.length === 0) {
+        alert('保存するデータがありません');
+        return;
+    }
+    
+    const dataStr = JSON.stringify(rawData, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'railway_data_updated.json';
+    link.click();
+    URL.revokeObjectURL(url);
+    
+    alert('ファイルを保存しました！');
+}
+
+// 임시 선 업데이트
+function updateTempLine() {
+    if (currentCoordinates.length === 0) return;
+    
+    const lineColor = document.getElementById('line-color').value;
+    
+    // 기존 임시 레이어 제거
+    if (map.getLayer('temp-line')) {
+        map.removeLayer('temp-line');
+        map.removeSource('temp-line');
+    }
+    if (map.getLayer('temp-points')) {
+        map.removeLayer('temp-points');
+        map.removeSource('temp-points');
+    }
+    
+    // 임시 선 추가
+    map.addSource('temp-line', {
+        'type': 'geojson',
+        'data': {
+            'type': 'Feature',
+            'geometry': {
+                'type': 'LineString',
+                'coordinates': currentCoordinates
+            }
+        }
+    });
+    
+    map.addLayer({
+        'id': 'temp-line',
+        'type': 'line',
+        'source': 'temp-line',
+        'paint': {
+            'line-color': lineColor,
+            'line-width': 4,
+            'line-dasharray': [2, 2]
+        }
+    });
+    
+    // 임시 점 추가
+    map.addSource('temp-points', {
+        'type': 'geojson',
+        'data': {
+            'type': 'FeatureCollection',
+            'features': currentCoordinates.map(coord => ({
+                'type': 'Feature',
+                'geometry': {
+                    'type': 'Point',
+                    'coordinates': coord
+                }
+            }))
+        }
+    });
+    
+    map.addLayer({
+        'id': 'temp-points',
+        'type': 'circle',
+        'source': 'temp-points',
+        'paint': {
+            'circle-radius': 5,
+            'circle-color': lineColor,
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff'
+        }
+    });
+}
+
+map.on('load', async () => {
+    try {
+        // GeoJSON 파일 로드
+        geojsonData = await loadAndConvertGeoJSON('Arcgis_railroad_extracted.json');
+        
+        // 데이터 소스 추가
+        map.addSource('railways', {
+            'type': 'geojson',
+            'data': geojsonData
+        });
+
+        // 레이어 추가
+        map.addLayer({
+            'id': 'railway-lines',
+            'type': 'line',
+            'source': 'railways',
+            'layout': {
+                'line-join': 'round',
+                'line-cap': 'round'
+            },
+            'paint': {
+                'line-color': ['get', 'color'],
+                'line-width': 3
+            }
+        });
+
+        // 클릭 이벤트 - 그리기 모드와 일반 모드 구분
+        map.on('click', (e) => {
+            if (isDrawing) {
+                // 그리기 모드: 좌표 추가
+                currentCoordinates.push([e.lngLat.lng, e.lngLat.lat]);
+                document.getElementById('coord-count').textContent = `座標数: ${currentCoordinates.length}`;
+                updateTempLine();
+            } else {
+                // 일반 모드: 선로 정보 표시
+                const features = map.queryRenderedFeatures(e.point, {
+                    layers: ['railway-lines']
+                });
+                
+                if (features.length > 0) {
+                    const properties = features[0].properties;
+                    const operatorTypeName = operatorTypeMap[properties.operatorType] || properties.operatorType;
+                    const railwayTypeName = railwayTypeMap[properties.railwayType] || properties.railwayType;
+                    
+                    new mapboxgl.Popup()
+                        .setLngLat(e.lngLat)
+                        .setHTML(`
+                            <div class="popup-title">${properties.label}</div>
+                            <div class="popup-row">
+                                <span class="popup-label">運営会社:</span> ${properties.operator}
+                            </div>
+                            <div class="popup-row">
+                                <span class="popup-label">事業者区分:</span> ${operatorTypeName}
+                            </div>
+                            <div class="popup-row">
+                                <span class="popup-label">路線種類:</span> ${railwayTypeName}
+                            </div>
+                        `)
+                        .addTo(map);
+                }
+            }
+        });
+
+        // 마우스 커서 변경
+        map.on('mouseenter', 'railway-lines', () => {
+            if (!isDrawing) {
+                map.getCanvas().style.cursor = 'pointer';
+            }
+        });
+        map.on('mouseleave', 'railway-lines', () => {
+            if (!isDrawing) {
+                map.getCanvas().style.cursor = '';
+            }
+        });
+
+        // 전체 노선이 보이도록 맵 조정
+        const bounds = new mapboxgl.LngLatBounds();
+        geojsonData.features.forEach(feature => {
+            feature.geometry.coordinates.forEach(line => {
+                line.forEach(coord => {
+                    bounds.extend(coord);
+                });
+            });
+        });
+        map.fitBounds(bounds, { padding: 50 });
+        
+    } catch (error) {
+        console.error('GeoJSON 로드 실패:', error);
+    }
+});
+</script>
+</body>
+</html>
