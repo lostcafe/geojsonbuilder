@@ -285,8 +285,10 @@
     <div style="margin: 10px 0;">
         <label style="font-size: 12px; font-weight: bold;">保存形式:</label>
         <select id="export-format" style="width: 100%; padding: 8px; margin: 5px 0;">
-            <option value="geojson">GeoJSON</option>
-            <option value="wkt">WKT</option>
+            <option value="geojson">GeoJSON (.json)</option>
+            <option value="wkt-json">WKT JSON (.json)</option>
+            <option value="wkt-text">WKT テキスト (.wkt)</option>
+            <option value="csv">CSV (.csv)</option>
         </select>
     </div>
 
@@ -294,7 +296,7 @@
         💾 ファイル保存
     </button>
 
-    <input type="file" id="file-input" accept=".json" style="display: none;" onchange="loadFile(event)">
+    <input type="file" id="file-input" accept=".json,.wkt,.txt,.csv" style="display: none;" onchange="loadFile(event)">
     <button class="btn-save" id="btn-load" onclick="document.getElementById('file-input').click()">
         📂 ファイル読込
     </button>
@@ -575,6 +577,122 @@ function convertWKTToData(wktData) {
     });
 }
 
+// 순수 WKT 텍스트 파일 파싱 (한 줄에 하나의 WKT)
+function parseWKTTextFile(text) {
+    const lines = text.trim().split('\n').filter(line => line.trim());
+    const data = [];
+
+    lines.forEach((line, index) => {
+        line = line.trim();
+        if (line.startsWith('LINESTRING') || line.startsWith('MULTILINESTRING')) {
+            const coords = parseWKT(line);
+            if (coords) {
+                data.push({
+                    label: `路線${index + 1}`,
+                    N02_004: '不明',
+                    N02_002: '4',
+                    N02_001: '12',
+                    coordinates: coords.length === 1 ? coords[0] : coords
+                });
+            }
+        }
+    });
+
+    return data;
+}
+
+// CSV 파일 파싱 (WKT 컬럼 포함)
+function parseCSVFile(text) {
+    const lines = text.trim().split('\n');
+    if (lines.length < 2) return [];
+
+    // 헤더 파싱
+    const headers = lines[0].split(',').map(h => h.trim());
+    const labelIdx = headers.findIndex(h => h.match(/label|name|路線名/i));
+    const operatorIdx = headers.findIndex(h => h.match(/operator|company|運営会社|N02_004/i));
+    const operatorTypeIdx = headers.findIndex(h => h.match(/operatorType|事業者区分|N02_002/i));
+    const railwayTypeIdx = headers.findIndex(h => h.match(/railwayType|路線種類|N02_001/i));
+    const wktIdx = headers.findIndex(h => h.match(/wkt|geometry|geom/i));
+
+    if (wktIdx === -1) {
+        throw new Error('CSV file must contain a WKT/geometry column');
+    }
+
+    const data = [];
+
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const cols = parseCSVLine(line);
+        const wktString = cols[wktIdx];
+
+        if (wktString && (wktString.startsWith('LINESTRING') || wktString.startsWith('MULTILINESTRING'))) {
+            const coords = parseWKT(wktString);
+            if (coords) {
+                data.push({
+                    label: labelIdx !== -1 ? cols[labelIdx] : `路線${i}`,
+                    N02_004: operatorIdx !== -1 ? cols[operatorIdx] : '不明',
+                    N02_002: operatorTypeIdx !== -1 ? cols[operatorTypeIdx] : '4',
+                    N02_001: railwayTypeIdx !== -1 ? cols[railwayTypeIdx] : '12',
+                    coordinates: coords.length === 1 ? coords[0] : coords
+                });
+            }
+        }
+    }
+
+    return data;
+}
+
+// CSV 라인 파싱 (쉼표 구분, 따옴표 처리)
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+
+        if (char === '"') {
+            inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+            result.push(current.trim());
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+
+    result.push(current.trim());
+    return result;
+}
+
+// 데이터를 순수 WKT 텍스트로 변환
+function convertDataToWKTText(data) {
+    return data.map(railway => {
+        const coords = normalizeCoordinates(railway.coordinates);
+        const wkt = coords.length === 1 ? lineStringToWKT(coords[0]) : multiLineStringToWKT(coords);
+        return `# ${railway.label} (${railway.N02_004})\n${wkt}`;
+    }).join('\n\n');
+}
+
+// 데이터를 CSV로 변환
+function convertDataToCSV(data) {
+    let csv = 'label,operator,operatorType,railwayType,geometry\n';
+
+    data.forEach(railway => {
+        const coords = normalizeCoordinates(railway.coordinates);
+        const wkt = coords.length === 1 ? lineStringToWKT(coords[0]) : multiLineStringToWKT(coords);
+
+        const label = railway.label.includes(',') ? `"${railway.label}"` : railway.label;
+        const operator = railway.N02_004.includes(',') ? `"${railway.N02_004}"` : railway.N02_004;
+
+        csv += `${label},${operator},${railway.N02_002},${railway.N02_001},"${wkt}"\n`;
+    });
+
+    return csv;
+}
+
 // 색상 찾기 함수
 function getLineColor(label) {
     if (lineColorMap[label]) {
@@ -768,17 +886,34 @@ function saveToFile() {
     const format = document.getElementById('export-format').value;
     let dataStr, fileName, mimeType;
 
-    if (format === 'wkt') {
-        // WKT 형식으로 변환
-        const wktData = convertDataToWKT(rawData);
-        dataStr = JSON.stringify(wktData, null, 2);
-        fileName = 'railway_data_wkt.json';
-        mimeType = 'application/json';
-    } else {
-        // GeoJSON 형식 (기본)
-        dataStr = JSON.stringify(rawData, null, 2);
-        fileName = 'railway_data_geojson.json';
-        mimeType = 'application/json';
+    switch (format) {
+        case 'wkt-json':
+            // WKT JSON 형식
+            const wktData = convertDataToWKT(rawData);
+            dataStr = JSON.stringify(wktData, null, 2);
+            fileName = 'railway_data_wkt.json';
+            mimeType = 'application/json';
+            break;
+
+        case 'wkt-text':
+            // 순수 WKT 텍스트
+            dataStr = convertDataToWKTText(rawData);
+            fileName = 'railway_data.wkt';
+            mimeType = 'text/plain';
+            break;
+
+        case 'csv':
+            // CSV 형식
+            dataStr = convertDataToCSV(rawData);
+            fileName = 'railway_data.csv';
+            mimeType = 'text/csv';
+            break;
+
+        default:
+            // GeoJSON 형식 (기본)
+            dataStr = JSON.stringify(rawData, null, 2);
+            fileName = 'railway_data_geojson.json';
+            mimeType = 'application/json';
     }
 
     const blob = new Blob([dataStr], { type: mimeType });
@@ -789,7 +924,7 @@ function saveToFile() {
     link.click();
     URL.revokeObjectURL(url);
 
-    alert(`${format.toUpperCase()} 形式でファイルを保存しました！`);
+    alert(`${fileName} を保存しました！`);
 }
 
 // 파일 로드
@@ -799,21 +934,46 @@ async function loadFile(event) {
 
     try {
         const text = await file.text();
-        const data = JSON.parse(text);
+        const fileName = file.name.toLowerCase();
+        let loadedData = null;
+        let formatName = '';
 
-        // 데이터 형식 감지 (WKT인지 GeoJSON 형식인지)
-        if (data.length > 0 && data[0].geometry && typeof data[0].geometry === 'string') {
-            // WKT 형식
-            rawData = convertWKTToData(data);
-            alert(`WKT 형式のファイルを読み込みました！\n路線数: ${rawData.length}`);
-        } else if (data.length > 0 && data[0].coordinates) {
-            // 일반 형식 (기존)
-            rawData = data;
-            alert(`ファイルを読み込みました！\n路線数: ${rawData.length}`);
+        // 파일 형식 감지
+        if (fileName.endsWith('.csv')) {
+            // CSV 파일
+            loadedData = parseCSVFile(text);
+            formatName = 'CSV';
+        } else if (fileName.endsWith('.wkt') || fileName.endsWith('.txt')) {
+            // 순수 WKT 텍스트 파일
+            loadedData = parseWKTTextFile(text);
+            formatName = 'WKT テキスト';
+        } else if (fileName.endsWith('.json')) {
+            // JSON 파일 (WKT JSON 또는 GeoJSON)
+            const data = JSON.parse(text);
+
+            if (data.length > 0 && data[0].geometry && typeof data[0].geometry === 'string') {
+                // WKT JSON 형식
+                loadedData = convertWKTToData(data);
+                formatName = 'WKT JSON';
+            } else if (data.length > 0 && data[0].coordinates) {
+                // GeoJSON 형식
+                loadedData = data;
+                formatName = 'GeoJSON';
+            } else {
+                alert('サポートされていないJSON形式です');
+                return;
+            }
         } else {
-            alert('サポートされていないファイル形式です');
+            alert('サポートされていないファイル形式です\\n(.json, .wkt, .txt, .csv をサポート)');
             return;
         }
+
+        if (!loadedData || loadedData.length === 0) {
+            alert('データが見つかりませんでした');
+            return;
+        }
+
+        rawData = loadedData;
 
         // GeoJSON으로 변환하여 지도 업데이트
         geojsonData = {
@@ -837,14 +997,27 @@ async function loadFile(event) {
         // 지도 소스 업데이트
         if (map.getSource('railways')) {
             map.getSource('railways').setData(geojsonData);
+
+            // 전체 노선이 보이도록 맵 조정
+            const bounds = new mapboxgl.LngLatBounds();
+            geojsonData.features.forEach(feature => {
+                feature.geometry.coordinates.forEach(line => {
+                    line.forEach(coord => {
+                        bounds.extend(coord);
+                    });
+                });
+            });
+            map.fitBounds(bounds, { padding: 50 });
         }
+
+        alert(formatName + ' 形式のファイルを読み込みました！\\n路線数: ' + rawData.length);
 
         // 파일 입력 초기화
         event.target.value = '';
 
     } catch (error) {
         console.error('ファイル読み込みエラー:', error);
-        alert('ファイルの読み込みに失敗しました');
+        alert('ファイルの読み込みに失敗しました\\n' + error.message);
     }
 }
 
