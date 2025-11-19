@@ -282,8 +282,21 @@
         ✕ キャンセル
     </button>
     
+    <div style="margin: 10px 0;">
+        <label style="font-size: 12px; font-weight: bold;">保存形式:</label>
+        <select id="export-format" style="width: 100%; padding: 8px; margin: 5px 0;">
+            <option value="geojson">GeoJSON</option>
+            <option value="wkt">WKT</option>
+        </select>
+    </div>
+
     <button class="btn-save" id="btn-save" onclick="saveToFile()">
         💾 ファイル保存
+    </button>
+
+    <input type="file" id="file-input" accept=".json" style="display: none;" onchange="loadFile(event)">
+    <button class="btn-save" id="btn-load" onclick="document.getElementById('file-input').click()">
+        📂 ファイル読込
     </button>
 
     <button class="btn-edit-mode" id="btn-edit-mode" onclick="toggleEditMode()">
@@ -458,6 +471,109 @@ let isEditMode = false; // 좌표 편집 모드
 let selectedLineIndex = null; // 선택된 선로 인덱스
 let selectedMultiLineIndex = 0; // MultiLineString 내 선택된 라인 인덱스
 let editingCoordIndex = null; // 편집 중인 좌표 인덱스
+
+// ========== WKT 변환 유틸리티 ==========
+
+// GeoJSON 좌표를 WKT 좌표 문자열로 변환 (경도 위도 순서)
+function coordsToWKT(coords) {
+    return coords.map(c => `${c[0]} ${c[1]}`).join(', ');
+}
+
+// WKT 좌표 문자열을 GeoJSON 좌표로 변환
+function wktToCoords(wktCoords) {
+    return wktCoords.trim().split(',').map(pair => {
+        const [lng, lat] = pair.trim().split(/\s+/).map(Number);
+        return [lng, lat];
+    });
+}
+
+// LineString을 WKT로 변환
+function lineStringToWKT(coordinates) {
+    return `LINESTRING(${coordsToWKT(coordinates)})`;
+}
+
+// MultiLineString을 WKT로 변환
+function multiLineStringToWKT(coordinates) {
+    const lines = coordinates.map(line => `(${coordsToWKT(line)})`).join(', ');
+    return `MULTILINESTRING(${lines})`;
+}
+
+// WKT LINESTRING 파싱
+function parseWKTLineString(wkt) {
+    const match = wkt.match(/LINESTRING\s*\(([^)]+)\)/i);
+    if (!match) return null;
+    return wktToCoords(match[1]);
+}
+
+// WKT MULTILINESTRING 파싱
+function parseWKTMultiLineString(wkt) {
+    const match = wkt.match(/MULTILINESTRING\s*\((.+)\)/i);
+    if (!match) return null;
+
+    const content = match[1];
+    const lines = [];
+    let depth = 0;
+    let current = '';
+
+    for (let i = 0; i < content.length; i++) {
+        const char = content[i];
+        if (char === '(') depth++;
+        else if (char === ')') depth--;
+
+        if (depth === 0 && char === ',') {
+            lines.push(wktToCoords(current));
+            current = '';
+        } else if (char !== '(' && char !== ')') {
+            current += char;
+        }
+    }
+    if (current.trim()) {
+        lines.push(wktToCoords(current));
+    }
+
+    return lines;
+}
+
+// WKT 문자열 파싱 (LINESTRING 또는 MULTILINESTRING)
+function parseWKT(wkt) {
+    wkt = wkt.trim();
+    if (wkt.startsWith('MULTILINESTRING')) {
+        return parseWKTMultiLineString(wkt);
+    } else if (wkt.startsWith('LINESTRING')) {
+        return [parseWKTLineString(wkt)];
+    }
+    return null;
+}
+
+// 전체 데이터를 WKT 형식으로 변환
+function convertDataToWKT(data) {
+    return data.map(railway => {
+        const coords = normalizeCoordinates(railway.coordinates);
+        const wkt = coords.length === 1 ? lineStringToWKT(coords[0]) : multiLineStringToWKT(coords);
+
+        return {
+            label: railway.label,
+            N02_004: railway.N02_004,
+            N02_002: railway.N02_002,
+            N02_001: railway.N02_001,
+            geometry: wkt
+        };
+    });
+}
+
+// WKT 데이터를 내부 형식으로 변환
+function convertWKTToData(wktData) {
+    return wktData.map(item => {
+        const coords = parseWKT(item.geometry);
+        return {
+            label: item.label,
+            N02_004: item.N02_004,
+            N02_002: item.N02_002,
+            N02_001: item.N02_001,
+            coordinates: coords.length === 1 ? coords[0] : coords
+        };
+    });
+}
 
 // 색상 찾기 함수
 function getLineColor(label) {
@@ -649,16 +765,87 @@ function saveToFile() {
         return;
     }
 
-    const dataStr = JSON.stringify(rawData, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
+    const format = document.getElementById('export-format').value;
+    let dataStr, fileName, mimeType;
+
+    if (format === 'wkt') {
+        // WKT 형식으로 변환
+        const wktData = convertDataToWKT(rawData);
+        dataStr = JSON.stringify(wktData, null, 2);
+        fileName = 'railway_data_wkt.json';
+        mimeType = 'application/json';
+    } else {
+        // GeoJSON 형식 (기본)
+        dataStr = JSON.stringify(rawData, null, 2);
+        fileName = 'railway_data_geojson.json';
+        mimeType = 'application/json';
+    }
+
+    const blob = new Blob([dataStr], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'railway_data_updated.json';
+    link.download = fileName;
     link.click();
     URL.revokeObjectURL(url);
 
-    alert('ファイルを保存しました！');
+    alert(`${format.toUpperCase()} 形式でファイルを保存しました！`);
+}
+
+// 파일 로드
+async function loadFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        // 데이터 형식 감지 (WKT인지 GeoJSON 형식인지)
+        if (data.length > 0 && data[0].geometry && typeof data[0].geometry === 'string') {
+            // WKT 형식
+            rawData = convertWKTToData(data);
+            alert(`WKT 형式のファイルを読み込みました！\n路線数: ${rawData.length}`);
+        } else if (data.length > 0 && data[0].coordinates) {
+            // 일반 형식 (기존)
+            rawData = data;
+            alert(`ファイルを読み込みました！\n路線数: ${rawData.length}`);
+        } else {
+            alert('サポートされていないファイル形式です');
+            return;
+        }
+
+        // GeoJSON으로 변환하여 지도 업데이트
+        geojsonData = {
+            'type': 'FeatureCollection',
+            'features': rawData.map(railway => ({
+                'type': 'Feature',
+                'properties': {
+                    'label': railway.label,
+                    'operator': railway.N02_004,
+                    'operatorType': railway.N02_002,
+                    'railwayType': railway.N02_001,
+                    'color': getLineColor(railway.label)
+                },
+                'geometry': {
+                    'type': 'MultiLineString',
+                    'coordinates': normalizeCoordinates(railway.coordinates)
+                }
+            }))
+        };
+
+        // 지도 소스 업데이트
+        if (map.getSource('railways')) {
+            map.getSource('railways').setData(geojsonData);
+        }
+
+        // 파일 입력 초기화
+        event.target.value = '';
+
+    } catch (error) {
+        console.error('ファイル読み込みエラー:', error);
+        alert('ファイルの読み込みに失敗しました');
+    }
 }
 
 // 편집 모드 토글
