@@ -228,6 +228,57 @@
         .selected-line-info strong {
             color: #1976d2;
         }
+
+        .line-actions {
+            display: flex;
+            gap: 5px;
+            margin: 10px 0;
+        }
+
+        .line-actions button {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .btn-delete-line {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-edit-line-info {
+            background: #FF9800;
+            color: white;
+        }
+
+        .line-info-edit-form {
+            background: #fff3cd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border: 2px solid #ffc107;
+        }
+
+        .line-info-edit-form input,
+        .line-info-edit-form select {
+            width: 100%;
+            padding: 5px;
+            margin: 3px 0;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            box-sizing: border-box;
+            font-size: 12px;
+        }
+
+        .line-info-edit-form label {
+            font-size: 11px;
+            color: #666;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -311,6 +362,17 @@
 
     <div id="selected-line-info" class="selected-line-info">
         路線を選択してください
+    </div>
+
+    <div id="line-info-edit-container"></div>
+
+    <div class="line-actions" id="line-actions" style="display: none;">
+        <button class="btn-edit-line-info" onclick="toggleLineInfoEdit()">
+            📝 路線情報編集
+        </button>
+        <button class="btn-delete-line" onclick="deleteRailwayLine()">
+            🗑️ 路線削除
+        </button>
     </div>
 
     <div id="coord-list" class="coord-list"></div>
@@ -1053,7 +1115,144 @@ function closeCoordinateEditor() {
     document.getElementById('btn-edit-mode').textContent = '✏️ 座標編集モード';
     document.getElementById('btn-edit-mode').style.background = '#9C27B0';
     document.getElementById('status-text').textContent = '路線情報を入力して「描画開始」をクリック';
+    document.getElementById('line-actions').style.display = 'none';
+    document.getElementById('line-info-edit-container').innerHTML = '';
     map.getCanvas().style.cursor = '';
+}
+
+// 라인(선로) 전체 삭제
+function deleteRailwayLine() {
+    if (selectedLineIndex === null) {
+        alert('路線が選択されていません');
+        return;
+    }
+
+    const railway = rawData[selectedLineIndex];
+    const lineName = railway.label;
+
+    if (!confirm(`路線「${lineName}」を完全に削除しますか？\nこの操作は取り消せません。`)) {
+        return;
+    }
+
+    // rawData에서 삭제
+    rawData.splice(selectedLineIndex, 1);
+
+    // geojsonData에서 삭제
+    geojsonData.features.splice(selectedLineIndex, 1);
+
+    // 지도 업데이트
+    map.getSource('railways').setData(geojsonData);
+
+    alert(`路線「${lineName}」を削除しました！`);
+
+    // 에디터 닫기
+    closeCoordinateEditor();
+}
+
+// 라인 정보 편집 토글
+let isEditingLineInfo = false;
+
+function toggleLineInfoEdit() {
+    if (selectedLineIndex === null) return;
+
+    isEditingLineInfo = !isEditingLineInfo;
+    const container = document.getElementById('line-info-edit-container');
+
+    if (isEditingLineInfo) {
+        const railway = rawData[selectedLineIndex];
+
+        container.innerHTML = `
+            <div class="line-info-edit-form">
+                <label>路線名</label>
+                <input type="text" id="edit-line-name" value="${railway.label}">
+
+                <label>運営会社</label>
+                <input type="text" id="edit-line-operator" value="${railway.N02_004}">
+
+                <label>事業者区分</label>
+                <select id="edit-line-operator-type">
+                    <option value="1" ${railway.N02_002 === '1' ? 'selected' : ''}>JR新幹線</option>
+                    <option value="2" ${railway.N02_002 === '2' ? 'selected' : ''}>JR在来線</option>
+                    <option value="3" ${railway.N02_002 === '3' ? 'selected' : ''}>公営鉄道</option>
+                    <option value="4" ${railway.N02_002 === '4' ? 'selected' : ''}>民営鉄道</option>
+                    <option value="5" ${railway.N02_002 === '5' ? 'selected' : ''}>第三セクター</option>
+                </select>
+
+                <label>路線種類</label>
+                <select id="edit-line-railway-type">
+                    <option value="11" ${railway.N02_001 === '11' ? 'selected' : ''}>JR</option>
+                    <option value="12" ${railway.N02_001 === '12' ? 'selected' : ''}>普通鉄道</option>
+                    <option value="21" ${railway.N02_001 === '21' ? 'selected' : ''}>軌道</option>
+                    <option value="22" ${railway.N02_001 === '22' ? 'selected' : ''}>懸垂式モノレール</option>
+                    <option value="23" ${railway.N02_001 === '23' ? 'selected' : ''}>跨座式モノレール</option>
+                </select>
+
+                <div style="display: flex; gap: 5px; margin-top: 10px;">
+                    <button class="btn-save-coord" style="flex: 1;" onclick="saveLineInfoEdit()">保存</button>
+                    <button class="btn-cancel-edit" style="flex: 1;" onclick="cancelLineInfoEdit()">キャンセル</button>
+                </div>
+            </div>
+        `;
+    } else {
+        container.innerHTML = '';
+    }
+}
+
+// 라인 정보 편집 저장
+function saveLineInfoEdit() {
+    if (selectedLineIndex === null) return;
+
+    const newLabel = document.getElementById('edit-line-name').value.trim();
+    const newOperator = document.getElementById('edit-line-operator').value.trim();
+    const newOperatorType = document.getElementById('edit-line-operator-type').value;
+    const newRailwayType = document.getElementById('edit-line-railway-type').value;
+
+    if (!newLabel || !newOperator) {
+        alert('路線名と運営会社を入力してください');
+        return;
+    }
+
+    // rawData 업데이트
+    rawData[selectedLineIndex].label = newLabel;
+    rawData[selectedLineIndex].N02_004 = newOperator;
+    rawData[selectedLineIndex].N02_002 = newOperatorType;
+    rawData[selectedLineIndex].N02_001 = newRailwayType;
+
+    // GeoJSON 업데이트
+    geojsonData.features[selectedLineIndex].properties.label = newLabel;
+    geojsonData.features[selectedLineIndex].properties.operator = newOperator;
+    geojsonData.features[selectedLineIndex].properties.operatorType = newOperatorType;
+    geojsonData.features[selectedLineIndex].properties.railwayType = newRailwayType;
+    geojsonData.features[selectedLineIndex].properties.color = getLineColor(newLabel);
+
+    // 지도 업데이트
+    map.getSource('railways').setData(geojsonData);
+
+    // 선로 정보 표시 업데이트
+    const operatorTypeName = operatorTypeMap[newOperatorType] || newOperatorType;
+    const railwayTypeName = railwayTypeMap[newRailwayType] || newRailwayType;
+    const railway = rawData[selectedLineIndex];
+    const multiLineCoords = normalizeCoordinates(railway.coordinates);
+
+    document.getElementById('selected-line-info').innerHTML = `
+        <strong>${newLabel}</strong><br>
+        運営会社: ${newOperator}<br>
+        事業者区分: ${operatorTypeName}<br>
+        路線種類: ${railwayTypeName}<br>
+        <small style="color: #666;">ライン ${selectedMultiLineIndex + 1}/${multiLineCoords.length}</small>
+    `;
+
+    // 편집 폼 닫기
+    isEditingLineInfo = false;
+    document.getElementById('line-info-edit-container').innerHTML = '';
+
+    alert('路線情報を更新しました！');
+}
+
+// 라인 정보 편집 취소
+function cancelLineInfoEdit() {
+    isEditingLineInfo = false;
+    document.getElementById('line-info-edit-container').innerHTML = '';
 }
 
 // 선로 선택하여 편집
@@ -1093,6 +1292,9 @@ function selectLineForEditing(featureIndex, clickedCoords) {
         路線種類: ${railwayTypeName}<br>
         <small style="color: #666;">ライン ${closestLineIndex + 1}/${multiLineCoords.length}</small>
     `;
+
+    // 라인 액션 버튼 표시
+    document.getElementById('line-actions').style.display = 'flex';
 
     // 좌표 목록 표시
     displayCoordinates();
