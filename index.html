@@ -1648,10 +1648,21 @@ function updateTempLine() {
 
 map.on('load', async () => {
     try {
-        // GeoJSON 파일 로드
-        geojsonData = await loadAndConvertGeoJSON('Arcgis_railroad_extracted.json');
-        
-        // 데이터 소스 추가
+        // 초기 데이터 로드 시도 (선택적)
+        try {
+            geojsonData = await loadAndConvertGeoJSON('Arcgis_railroad_extracted.json');
+            console.log('初期データを読み込みました');
+        } catch (loadError) {
+            // 파일이 없으면 빈 데이터로 초기화
+            console.log('初期データファイルが見つかりません。空のデータで開始します。');
+            rawData = [];
+            geojsonData = {
+                'type': 'FeatureCollection',
+                'features': []
+            };
+        }
+
+        // 데이터 소스 추가 (빈 데이터라도 생성)
         map.addSource('railways', {
             'type': 'geojson',
             'data': geojsonData
@@ -1736,19 +1747,22 @@ map.on('load', async () => {
             }
         });
 
-        // 전체 노선이 보이도록 맵 조정
-        const bounds = new mapboxgl.LngLatBounds();
-        geojsonData.features.forEach(feature => {
-            feature.geometry.coordinates.forEach(line => {
-                line.forEach(coord => {
-                    bounds.extend(coord);
+        // 전체 노선이 보이도록 맵 조정 (데이터가 있을 경우만)
+        if (geojsonData.features.length > 0) {
+            const bounds = new mapboxgl.LngLatBounds();
+            geojsonData.features.forEach(feature => {
+                feature.geometry.coordinates.forEach(line => {
+                    line.forEach(coord => {
+                        bounds.extend(coord);
+                    });
                 });
             });
-        });
-        map.fitBounds(bounds, { padding: 50 });
-        
+            map.fitBounds(bounds, { padding: 50 });
+        }
+
     } catch (error) {
-        console.error('GeoJSON 로드 실패:', error);
+        console.error('マップ初期化エラー:', error);
+        alert('マップの初期化に失敗しました。ページを再読み込みしてください。');
     }
 });
 </script>
