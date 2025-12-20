@@ -453,7 +453,23 @@
             2: { feature: null, visible: true, color: '#f59e0b', selected: new Set() },
             3: { feature: null, visible: true, color: '#10b981', selected: new Set() }
         };
-        
+
+        // MULTILINESTRING의 각 LineString에 적용할 색상 팔레트
+        const lineColorPalette = [
+            '#667eea', // 파랑
+            '#f59e0b', // 주황
+            '#10b981', // 초록
+            '#ef4444', // 빨강
+            '#8b5cf6', // 보라
+            '#ec4899', // 핑크
+            '#14b8a6', // 청록
+            '#f97316', // 진한 주황
+            '#06b6d4', // 하늘색
+            '#84cc16', // 연두
+            '#f43f5e', // 장미색
+            '#6366f1', // 인디고
+        ];
+
         let activeLayer = 1;
         let isSelectMode = false;
         let isAddPointMode = false;
@@ -590,7 +606,7 @@
 
         function loadGeometry(layerNum) {
             const geomInput = document.getElementById(`geomInput${layerNum}`).value.trim();
-            
+
             if (!geomInput) {
                 showMessage('Geometry 데이터를 입력해주세요', 'error');
                 return;
@@ -600,16 +616,55 @@
                 const feature = parseWKT(geomInput);
                 const layer = layers[layerNum];
                 layer.feature = feature;
-                
+
                 const layerId = `route-layer-${layerNum}`;
                 const sourceId = `route-${layerNum}`;
-                
+
                 if (map.getLayer(layerId)) map.removeLayer(layerId);
                 if (map.getSource(sourceId)) map.removeSource(sourceId);
 
+                // MULTILINESTRING의 경우 각 LineString을 별도의 feature로 분리하여 다른 색상 적용
+                let sourceData;
+                let linePaint;
+
+                if (feature.geometry.type === 'MultiLineString') {
+                    // 각 LineString을 별도의 feature로 만들어 FeatureCollection 생성
+                    const features = feature.geometry.coordinates.map((lineCoords, index) => ({
+                        type: 'Feature',
+                        properties: {
+                            lineIndex: index,
+                            color: lineColorPalette[index % lineColorPalette.length]
+                        },
+                        geometry: {
+                            type: 'LineString',
+                            coordinates: lineCoords
+                        }
+                    }));
+
+                    sourceData = {
+                        type: 'FeatureCollection',
+                        features: features
+                    };
+
+                    // data-driven styling으로 각 lineIndex에 따라 다른 색상 적용
+                    linePaint = {
+                        'line-color': ['get', 'color'],
+                        'line-width': 4,
+                        'line-opacity': 0.8
+                    };
+                } else {
+                    // LINESTRING의 경우 기존과 동일하게 단일 색상
+                    sourceData = feature;
+                    linePaint = {
+                        'line-color': layer.color,
+                        'line-width': 4,
+                        'line-opacity': 0.8
+                    };
+                }
+
                 map.addSource(sourceId, {
                     type: 'geojson',
-                    data: feature
+                    data: sourceData
                 });
 
                 map.addLayer({
@@ -617,28 +672,24 @@
                     type: 'line',
                     source: sourceId,
                     layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: {
-                        'line-color': layer.color,
-                        'line-width': 4,
-                        'line-opacity': 0.8
-                    }
+                    paint: linePaint
                 });
 
                 updatePointsLayer();
 
                 const geometryType = feature.geometry.type;
                 let pointCount = 0, lineCount = 1;
-                
+
                 if (geometryType === 'LineString') {
                     pointCount = feature.geometry.coordinates.length;
                 } else {
                     lineCount = feature.geometry.coordinates.length;
                     pointCount = feature.geometry.coordinates.reduce((sum, line) => sum + line.length, 0);
                 }
-                
-                document.getElementById(`stats${layerNum}`).textContent = 
+
+                document.getElementById(`stats${layerNum}`).textContent =
                     `${lineCount}라인, ${pointCount}포인트`;
-                
+
                 showMessage(`Layer ${layerNum}: ${geometryType} 로드 완료`, 'success');
             } catch (error) {
                 showMessage(`오류: ${error.message}`, 'error');
@@ -662,31 +713,61 @@
                 const layer = layers[layerNum];
                 if (!layer.feature || !layer.visible) return;
 
-                const coords = layer.feature.geometry.type === 'LineString'
-                    ? layer.feature.geometry.coordinates
-                    : layer.feature.geometry.coordinates.flat();
+                if (layer.feature.geometry.type === 'LineString') {
+                    // LINESTRING: 기존과 동일하게 처리
+                    layer.feature.geometry.coordinates.forEach((coord, idx) => {
+                        const pointFeature = {
+                            type: 'Feature',
+                            geometry: { type: 'Point', coordinates: coord },
+                            properties: {
+                                layerNum: layerNum,
+                                index: idx,
+                                color: layer.color,
+                                coords: `${coord[0].toFixed(12)}, ${coord[1].toFixed(12)}`
+                            }
+                        };
 
-                coords.forEach((coord, idx) => {
-                    const pointFeature = {
-                        type: 'Feature',
-                        geometry: { type: 'Point', coordinates: coord },
-                        properties: {
-                            layerNum: layerNum,
-                            index: idx,
-                            color: layer.color,
-                            coords: `${coord[0].toFixed(12)}, ${coord[1].toFixed(12)}`
+                        allPoints.push(pointFeature);
+
+                        if (layerNum === activeLayer) {
+                            const key = `${idx}`;
+                            if (layer.selected.has(key)) {
+                                selectedPoints.push(pointFeature);
+                            }
                         }
-                    };
+                    });
+                } else {
+                    // MULTILINESTRING: 각 LineString마다 다른 색상 적용
+                    let flatIndex = 0;
+                    layer.feature.geometry.coordinates.forEach((lineCoords, lineIndex) => {
+                        const lineColor = lineColorPalette[lineIndex % lineColorPalette.length];
 
-                    allPoints.push(pointFeature);
+                        lineCoords.forEach((coord, pointIdx) => {
+                            const pointFeature = {
+                                type: 'Feature',
+                                geometry: { type: 'Point', coordinates: coord },
+                                properties: {
+                                    layerNum: layerNum,
+                                    index: flatIndex,
+                                    lineIndex: lineIndex,
+                                    color: lineColor,
+                                    coords: `${coord[0].toFixed(12)}, ${coord[1].toFixed(12)}`
+                                }
+                            };
 
-                    if (layerNum === activeLayer) {
-                        const key = `${idx}`;
-                        if (layer.selected.has(key)) {
-                            selectedPoints.push(pointFeature);
-                        }
-                    }
-                });
+                            allPoints.push(pointFeature);
+
+                            if (layerNum === activeLayer) {
+                                const key = `${flatIndex}`;
+                                if (layer.selected.has(key)) {
+                                    selectedPoints.push(pointFeature);
+                                }
+                            }
+
+                            flatIndex++;
+                        });
+                    });
+                }
             });
 
             if (allPoints.length > 0) {
