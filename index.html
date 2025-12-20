@@ -1,675 +1,1331 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <meta charset="utf-8">
-    <title>Railway Map Editor</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PostGIS Multi-Layer Viewer (Optimized)</title>
     <script src='https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.js'></script>
     <link href='https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.css' rel='stylesheet' />
     <style>
-        body { margin: 0; padding: 0; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        
-        .editor-panel {
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .input-panel {
+            width: 450px;
+            background: #f8f9fa;
+            padding: 20px;
+            overflow-y: auto;
+            border-right: 1px solid #e0e0e0;
+        }
+
+        .layer-section {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .layer-section.active {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+        }
+
+        .layer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .layer-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .layer-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 2px solid white;
+            box-shadow: 0 0 0 1px #ccc;
+        }
+
+        .layer-controls {
+            display: flex;
+            gap: 5px;
+        }
+
+        .layer-controls button {
+            padding: 4px 8px;
+            font-size: 11px;
+            min-width: auto;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            resize: vertical;
+            transition: border-color 0.3s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+
+        .btn-secondary:hover {
+            background: #f0f0f0;
+        }
+
+        .btn-secondary.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .message {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            display: none;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .merge-section {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+
+        .examples {
+            margin-top: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .examples h3 {
+            font-size: 13px;
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .example-item {
+            margin-bottom: 8px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 11px;
+        }
+
+        .example-item:hover {
+            background: #e9ecef;
+        }
+
+        #map {
+            flex: 1;
+            position: relative;
+        }
+
+        #map.select-mode .mapboxgl-canvas-container {
+            cursor: crosshair !important;
+        }
+
+        #map.select-mode .mapboxgl-canvas {
+            cursor: crosshair !important;
+        }
+
+        #map.add-point-mode .mapboxgl-canvas-container {
+            cursor: copy !important;
+        }
+
+        #map.add-point-mode .mapboxgl-canvas {
+            cursor: copy !important;
+        }
+
+        .map-controls {
             position: absolute;
             top: 10px;
             right: 10px;
             background: white;
-            padding: 20px;
+            padding: 10px;
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             z-index: 1;
-            max-width: 300px;
+            min-width: 180px;
         }
-        
-        .editor-panel h3 {
-            margin-top: 0;
-            font-size: 16px;
-            color: #333;
-        }
-        
-        .editor-panel input, .editor-panel select {
+
+        .map-controls select {
             width: 100%;
+            margin-bottom: 8px;
             padding: 8px;
-            margin: 5px 0;
+            border-radius: 6px;
             border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        
-        .editor-panel button {
-            width: 100%;
-            padding: 10px;
-            margin: 5px 0;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        
-        .btn-start {
-            background: #4CAF50;
-            color: white;
-        }
-        
-        .btn-finish {
-            background: #2196F3;
-            color: white;
-        }
-        
-        .btn-cancel {
-            background: #f44336;
-            color: white;
-        }
-        
-        .btn-save {
-            background: #FF9800;
-            color: white;
-        }
-        
-        .btn-disabled {
-            background: #cccccc;
-            cursor: not-allowed;
-        }
-        
-        .info-text {
             font-size: 12px;
+        }
+
+        .map-controls button {
+            width: 100%;
+            margin-bottom: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        .map-controls button:last-child {
+            margin-bottom: 0;
+        }
+
+        .map-controls label {
+            display: block;
+            font-size: 11px;
+            margin-bottom: 8px;
             color: #666;
-            margin: 10px 0;
         }
-        
-        .coordinates-count {
-            font-size: 14px;
-            color: #2196F3;
-            font-weight: bold;
+
+        .map-controls input[type="checkbox"] {
+            margin-right: 5px;
         }
-        
-        .mapboxgl-popup-content {
-            padding: 15px;
-            min-width: 200px;
+
+        #selectionBox {
+            position: absolute;
+            border: 2px dashed #667eea;
+            background: rgba(102, 126, 234, 0.1);
+            pointer-events: none;
+            display: none;
+            z-index: 999;
         }
-        .popup-title {
-            font-size: 16px;
-            font-weight: bold;
-            margin-bottom: 10px;
-            color: #333;
+
+        .temp-point-marker {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 0 0 2px #ff4444, 0 2px 8px rgba(0,0,0,0.3);
+            animation: pulse 1s infinite;
         }
-        .popup-row {
-            margin: 5px 0;
-            font-size: 14px;
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.8; }
         }
-        .popup-label {
+
+        .stats {
+            font-size: 11px;
             color: #666;
-            font-weight: 500;
+            margin-top: 5px;
         }
     </style>
 </head>
 <body>
-<div id='map'></div>
-
-<div class="editor-panel">
-    <h3>🚆 路線エディター</h3>
-    
-    <div id="input-section">
-        <input type="text" id="line-name" placeholder="路線名 (例: 山手線)">
-        <input type="text" id="operator-name" placeholder="運営会社 (例: 東日本旅客鉄道)">
-        
-        <select id="operator-type">
-            <option value="">事業者区分を選択</option>
-            <option value="1">JR新幹線</option>
-            <option value="2">JR在来線</option>
-            <option value="3">公営鉄道</option>
-            <option value="4">民営鉄道</option>
-            <option value="5">第三セクター</option>
-        </select>
-        
-        <select id="railway-type">
-            <option value="">路線種類を選択</option>
-            <option value="11">JR</option>
-            <option value="12">普通鉄道</option>
-            <option value="21">軌道</option>
-            <option value="22">懸垂式モノレール</option>
-            <option value="23">跨座式モノレール</option>
-        </select>
-        
-        <input type="color" id="line-color" value="#0066ff">
-        <label for="line-color" style="font-size: 12px;">路線カラー</label>
+    <div class="header">
+        <h1>🗺️ PostGIS Multi-Layer Viewer (Optimized)</h1>
+        <p>대용량 데이터 최적화 - 20만 포인트 이상 지원</p>
     </div>
-    
-    <div class="info-text" id="status-text">
-        路線情報を入力して「描画開始」をクリック
+
+    <div class="container">
+        <div class="input-panel">
+            <!-- Layer 1 -->
+            <div class="layer-section active" id="layer1-section">
+                <div class="layer-header">
+                    <div class="layer-title">
+                        <div class="layer-color" style="background: #667eea;"></div>
+                        <span>Layer 1</span>
+                    </div>
+                    <div class="layer-controls">
+                        <button class="btn-secondary" onclick="toggleLayerVisibility(1)">👁️</button>
+                        <button class="btn-secondary" onclick="clearLayer(1)">🗑️</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <textarea id="geomInput1" placeholder="LINESTRING(...) 또는 MULTILINESTRING(...)"></textarea>
+                    <div class="stats" id="stats1"></div>
+                </div>
+                <button class="btn-primary" onclick="loadGeometry(1)" style="width: 100%; margin-bottom: 8px;">표시</button>
+                <button class="btn-secondary" onclick="autoConnectPoints(1)" style="width: 100%;">🔗 자동 연결</button>
+            </div>
+
+            <!-- Layer 2 -->
+            <div class="layer-section" id="layer2-section">
+                <div class="layer-header">
+                    <div class="layer-title">
+                        <div class="layer-color" style="background: #f59e0b;"></div>
+                        <span>Layer 2</span>
+                    </div>
+                    <div class="layer-controls">
+                        <button class="btn-secondary" onclick="toggleLayerVisibility(2)">👁️</button>
+                        <button class="btn-secondary" onclick="clearLayer(2)">🗑️</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <textarea id="geomInput2" placeholder="LINESTRING(...) 또는 MULTILINESTRING(...)"></textarea>
+                    <div class="stats" id="stats2"></div>
+                </div>
+                <button class="btn-primary" onclick="loadGeometry(2)" style="width: 100%; margin-bottom: 8px;">표시</button>
+                <button class="btn-secondary" onclick="autoConnectPoints(2)" style="width: 100%;">🔗 자동 연결</button>
+            </div>
+
+            <!-- Layer 3 -->
+            <div class="layer-section" id="layer3-section">
+                <div class="layer-header">
+                    <div class="layer-title">
+                        <div class="layer-color" style="background: #10b981;"></div>
+                        <span>Layer 3</span>
+                    </div>
+                    <div class="layer-controls">
+                        <button class="btn-secondary" onclick="toggleLayerVisibility(3)">👁️</button>
+                        <button class="btn-secondary" onclick="clearLayer(3)">🗑️</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <textarea id="geomInput3" placeholder="LINESTRING(...) 또는 MULTILINESTRING(...)"></textarea>
+                    <div class="stats" id="stats3"></div>
+                </div>
+                <button class="btn-primary" onclick="loadGeometry(3)" style="width: 100%; margin-bottom: 8px;">표시</button>
+                <button class="btn-secondary" onclick="autoConnectPoints(3)" style="width: 100%;">🔗 자동 연결</button>
+            </div>
+
+            <!-- 합체 버튼 -->
+            <div class="merge-section">
+                <button class="btn-primary" onclick="mergeLayers()" style="width: 100%;">
+                    🔗 모든 레이어 합체 → Layer 1
+                </button>
+            </div>
+
+            <div id="message" class="message"></div>
+
+            <div class="examples">
+                <h3>📋 예제 데이터</h3>
+                <div class="example-item" onclick="loadExampleToLayer(0, 1)">
+                    예제 1 → Layer 1
+                </div>
+                <div class="example-item" onclick="loadExampleToLayer(1, 2)">
+                    예제 2 → Layer 2
+                </div>
+                <div class="example-item" onclick="loadExampleToLayer(2, 3)">
+                    예제 3 → Layer 3
+                </div>
+            </div>
+        </div>
+
+        <div id="map">
+            <div class="map-controls">
+                <select id="activeLayerSelect" onchange="changeActiveLayer()">
+                    <option value="1">편집: Layer 1 (파랑)</option>
+                    <option value="2">편집: Layer 2 (주황)</option>
+                    <option value="3">편집: Layer 3 (초록)</option>
+                </select>
+                <label>
+                    <input type="checkbox" id="showMarkersToggle" onchange="toggleMarkersVisibility()" checked>
+                    포인트 마커 표시
+                </label>
+                <label>
+                    <input type="checkbox" id="splitLineToggle" checked>
+                    삭제 시 라인 분리
+                </label>
+                <button id="addPointModeBtn" class="btn-secondary" onclick="toggleAddPointMode()">
+                    ➕ 포인트 추가
+                </button>
+                <button id="selectModeBtn" class="btn-secondary" onclick="toggleSelectMode()">
+                    선택 모드
+                </button>
+                <button id="deleteBtn" class="btn-primary" onclick="deleteSelectedPoints()" disabled>
+                    선택 삭제 (0)
+                </button>
+                <button class="btn-secondary" onclick="clearSelection()">
+                    선택 해제
+                </button>
+            </div>
+            <div id="selectionBox"></div>
+        </div>
     </div>
-    
-    <div class="coordinates-count" id="coord-count">
-        座標数: 0
-    </div>
-    
-    <button class="btn-start" id="btn-start" onclick="startDrawing()">
-        📍 描画開始
-    </button>
-    
-    <button class="btn-finish btn-disabled" id="btn-finish" onclick="finishDrawing()" disabled>
-        ✓ 路線完成
-    </button>
-    
-    <button class="btn-cancel btn-disabled" id="btn-cancel" onclick="cancelDrawing()" disabled>
-        ✕ キャンセル
-    </button>
-    
-    <button class="btn-save" id="btn-save" onclick="saveToFile()">
-        💾 ファイル保存
-    </button>
-</div>
 
-<script>
-// Mapbox 액세스 토큰 설정
-mapboxgl.accessToken = 'pk.eyJ1IjoibG9zdGNhZmUwIiwiYSI6ImNsMnBoOHpyMTAyMzczY254MmthZG1rOWEifQ.p_Xuk6AkxC7C9W4CPBwrjA';
+    <script>
+        // Mapbox 액세스 토큰
+        mapboxgl.accessToken = 'pk.eyJ1IjoibG9zdGNhZmUwIiwiYSI6ImNsMnBoOHpyMTAyMzczY254MmthZG1rOWEifQ.p_Xuk6AkxC7C9W4CPBwrjA';
 
-// 선로 색상 매핑
-const lineColorMap = {
-    "小田原線": "#0085CE",
-    "江ノ島線": "#0085CE",
-    "多摩線": "#0085CE",
-    "多摩モノレール": "#286460",
-    "ブルーライン": "#0070C0",
-    "グリーンライン": "#00B050",
-    "秋田新幹線": "#ED4399",
-    "左沢線": "#0073BF",
-    "磐越東線": "#C71585",
-    "磐越西線": "#CB7B35",
-    "丸ノ内線": "#F62E36",
-    "千代田線": "#00BB85",
-    "南北線": "#00AC9B",
-    "副都心線": "#9C5E31",
-    "銀座線": "#FF9500",
-    "半蔵門線": "#8F76D6",
-    "日比谷線": "#B5B5AC",
-    "東西線": "#009BBF",
-    "有楽町線": "#C1A470",
-    "丸ノ内線支線": "#F62E36",
-    "中央・総武各駅停車": "#FFE500",
-    "中央本線": "#0071C5",
-    "常磐線": "#0071C5",
-    "吾妻線": "#008689",
-    "中央線快速": "#EB5C01",
-    "八高線": "#A09D95",
-    "伊東線": "#FF9845",
-    "川越線(川越-高麗川間)": "#A6A9AB",
-    "五日市線": "#EB5C01",
-    "常磐線各駅停車": "#9E9E9F",
-    "常磐線快速": "#00C18A",
-    "上越線": "#00ACD1",
-    "鹿島線": "#A85F12",
-    "京浜東北線・根岸線": "#00A7E3",
-    "京葉線": "#CF1225",
-    "久留里線": "#00C3A7",
-    "成田線": "#00BB85",
-    "武蔵野線": "#EB5C01",
-    "南武線浜川崎支線": "#FFE400",
-    "南武線": "#FFE400",
-    "成田線我孫子支線": "#00BB85",
-    "成田線空港支線": "#00BB85",
-    "青梅線": "#EB5C01",
-    "相模線": "#008689",
-    "埼京線・川越線": "#00AC84",
-    "湘南新宿ライン": "#DE0515",
-    "総武快速線": "#0074BE",
-    "総武本線": "#FDD700",
-    "相鉄直通線": "#00C3A7",
-    "外房線": "#F22335",
-    "高崎線": "#FF9845",
-    "東金線": "#B31C31",
-    "東海道線": "#FF9845",
-    "鶴見線大川支線": "#FFE500",
-    "鶴見線海芝浦支線": "#FFE500",
-    "鶴見線": "#FFE500",
-    "内房線": "#0071C5",
-    "宇都宮線": "#FF9845",
-    "山手線": "#85C023",
-    "横浜線": "#85C023",
-    "横須賀線": "#0074BE",
-    "浅草線": "#FF535F",
-    "三田線": "#0067B0",
-    "大江戸線": "#CF3366",
-    "新宿線": "#9FB01C",
-    "日光線": "#F5A302",
-    "東武スカイツリーライン": "#226BB8",
-    "大師線": "#226BB8",
-    "伊勢崎線": "#E62119",
-    "桐生線": "#E62119",
-    "亀戸線": "#226BB8",
-    "鬼怒川線": "#F5A302",
-    "ゆりかもめ": "#0065A6",
-    "小泉線(東小泉-太田)": "#E62119",
-    "小泉線": "#E62119",
-    "越生線": "#10428B",
-    "佐野線": "#E62119",
-    "東武スカイツリーライン(押上-曳舟)": "#226BB8",
-    "東武アーバンパークライン": "#41B3E5",
-    "東上線": "#10428B",
-    "宇都宮線": "#F5A302",
-    "京急本線": "#0DB0E9",
-    "空港線": "#0DB0E9",
-    "大師線": "#0DB0E9",
-    "久里浜線": "#0DB0E9",
-    "逗子線": "#0DB0E9",
-    "りんかい線": "#222D65",
-    "東急多摩川線": "#AE0379",
-    "東横線": "#DB0442",
-    "豊島線": "#FF710A",
-    "いずみ野線": "#0073BC",
-    "相鉄本線": "#0073BC",
-    "相鉄新横浜線": "#0073BC",
-    "拝島線": "#00A8B5",
-    "池袋線": "#FF710A",
-    "国分寺線": "#00A943",
-    "狭山線": "#FF710A",
-    "西武秩父線": "#FF710A",
-    "西武有楽町線": "#FF710A",
-    "西武園線": "#00A943",
-    "新宿線": "#00A8B5",
-    "多摩川線": "#FF710A",
-    "田園都市線": "#00AA8E",
-    "池上線": "#EE86A7",
-    "世田谷線": "#FCC80D",
-    "こどもの国線": "#0071BE",
-    "目黒線": "#009CD3",
-    "大井町線": "#F18C43",
-    "東急新横浜線": "#890D84",
-    "多摩湖線": "#FFA600",
-    "山口線": "#FF565D"
-};
-
-// 사업자 구분 코드 매핑
-const operatorTypeMap = {
-    "1": "JR新幹線", 
-    "2": "JR在来線", 
-    "3": "公営鉄道", 
-    "4": "民営鉄道", 
-    "5": "第三セクター" 
-};
-
-// 노선 종류 구분 코드 매핑
-const railwayTypeMap = { 
-    "11": "JR", 
-    "12": "普通鉄道", 
-    "13": "鋼索鉄道", 
-    "14": "懸垂式鉄道", 
-    "15": "跨座式鉄道", 
-    "16": "案内軌条式鉄道", 
-    "17": "無軌条鉄道", 
-    "21": "軌道", 
-    "22": "懸垂式モノレール", 
-    "23": "跨座式モノレール", 
-    "24": "案内軌条式", 
-    "25": "浮上式" 
-};
-
-// 편집 상태 관리
-let isDrawing = false;
-let currentCoordinates = [];
-let rawData = []; // 원본 데이터 저장
-let geojsonData = null; // 변환된 GeoJSON 데이터
-
-// 색상 찾기 함수
-function getLineColor(label) {
-    if (lineColorMap[label]) {
-        return lineColorMap[label];
-    }
-    if (label.startsWith('JR')) {
-        const labelWithoutJR = label.substring(2);
-        if (lineColorMap[labelWithoutJR]) {
-            return lineColorMap[labelWithoutJR];
-        }
-    }
-    return '#0066ff';
-}
-
-// 좌표 정규화 함수
-function normalizeCoordinates(coords) {
-    if (Array.isArray(coords[0]) && Array.isArray(coords[0][0])) {
-        return coords;
-    } else {
-        return [coords];
-    }
-}
-
-// GeoJSON 파일 로드 및 변환
-async function loadAndConvertGeoJSON(url) {
-    const response = await fetch(url);
-    const data = await response.json();
-    rawData = data; // 원본 데이터 저장
-    
-    return {
-        'type': 'FeatureCollection',
-        'features': data.map(railway => ({
-            'type': 'Feature',
-            'properties': {
-                'label': railway.label,
-                'operator': railway.N02_004,
-                'operatorType': railway.N02_002,
-                'railwayType': railway.N02_001,
-                'color': getLineColor(railway.label)
-            },
-            'geometry': {
-                'type': 'MultiLineString',
-                'coordinates': normalizeCoordinates(railway.coordinates)
-            }
-        }))
-    };
-}
-
-// 맵 초기화
-const map = new mapboxgl.Map({
-    container: 'map',
-    style: 'mapbox://styles/lostcafe0/cmgyogzdq007201r59ni6b9fd',
-    center: [135, 35],
-    zoom: 5
-});
-
-// 그리기 시작
-function startDrawing() {
-    const lineName = document.getElementById('line-name').value;
-    const operatorName = document.getElementById('operator-name').value;
-    const operatorType = document.getElementById('operator-type').value;
-    const railwayType = document.getElementById('railway-type').value;
-    
-    if (!lineName || !operatorName || !operatorType || !railwayType) {
-        alert('すべての情報を入力してください');
-        return;
-    }
-    
-    isDrawing = true;
-    currentCoordinates = [];
-    
-    document.getElementById('btn-start').disabled = true;
-    document.getElementById('btn-start').classList.add('btn-disabled');
-    document.getElementById('btn-finish').disabled = false;
-    document.getElementById('btn-finish').classList.remove('btn-disabled');
-    document.getElementById('btn-cancel').disabled = false;
-    document.getElementById('btn-cancel').classList.remove('btn-disabled');
-    document.getElementById('input-section').style.opacity = '0.5';
-    document.getElementById('status-text').textContent = '地図をクリックして座標を追加';
-    
-    map.getCanvas().style.cursor = 'crosshair';
-}
-
-// 그리기 완료
-function finishDrawing() {
-    if (currentCoordinates.length < 2) {
-        alert('最低2つの座標が必要です');
-        return;
-    }
-    
-    const lineName = document.getElementById('line-name').value;
-    const operatorName = document.getElementById('operator-name').value;
-    const operatorType = document.getElementById('operator-type').value;
-    const railwayType = document.getElementById('railway-type').value;
-    const lineColor = document.getElementById('line-color').value;
-    
-    // 원본 데이터에 추가
-    const newRailway = {
-        label: lineName,
-        N02_004: operatorName,
-        N02_002: operatorType,
-        N02_001: railwayType,
-        coordinates: currentCoordinates
-    };
-    
-    rawData.push(newRailway);
-    
-    // GeoJSON에 추가
-    const newFeature = {
-        'type': 'Feature',
-        'properties': {
-            'label': lineName,
-            'operator': operatorName,
-            'operatorType': operatorType,
-            'railwayType': railwayType,
-            'color': lineColor
-        },
-        'geometry': {
-            'type': 'MultiLineString',
-            'coordinates': [currentCoordinates]
-        }
-    };
-    
-    geojsonData.features.push(newFeature);
-    
-    // 지도 업데이트
-    map.getSource('railways').setData(geojsonData);
-    
-    // 상태 리셋
-    resetDrawing();
-    
-    alert(`路線「${lineName}」を追加しました！\n座標数: ${currentCoordinates.length}`);
-}
-
-// 그리기 취소
-function cancelDrawing() {
-    if (currentCoordinates.length > 0) {
-        if (!confirm('描画中のデータを破棄しますか？')) {
-            return;
-        }
-    }
-    
-    // 임시 레이어 제거
-    if (map.getLayer('temp-line')) {
-        map.removeLayer('temp-line');
-        map.removeSource('temp-line');
-    }
-    if (map.getLayer('temp-points')) {
-        map.removeLayer('temp-points');
-        map.removeSource('temp-points');
-    }
-    
-    resetDrawing();
-}
-
-// 상태 리셋
-function resetDrawing() {
-    isDrawing = false;
-    currentCoordinates = [];
-    
-    document.getElementById('btn-start').disabled = false;
-    document.getElementById('btn-start').classList.remove('btn-disabled');
-    document.getElementById('btn-finish').disabled = true;
-    document.getElementById('btn-finish').classList.add('btn-disabled');
-    document.getElementById('btn-cancel').disabled = true;
-    document.getElementById('btn-cancel').classList.add('btn-disabled');
-    document.getElementById('input-section').style.opacity = '1';
-    document.getElementById('status-text').textContent = '路線情報を入力して「描画開始」をクリック';
-    document.getElementById('coord-count').textContent = '座標数: 0';
-    
-    map.getCanvas().style.cursor = '';
-    
-    // 임시 레이어 제거
-    if (map.getLayer('temp-line')) {
-        map.removeLayer('temp-line');
-        map.removeSource('temp-line');
-    }
-    if (map.getLayer('temp-points')) {
-        map.removeLayer('temp-points');
-        map.removeSource('temp-points');
-    }
-}
-
-// 파일로 저장
-function saveToFile() {
-    if (rawData.length === 0) {
-        alert('保存するデータがありません');
-        return;
-    }
-    
-    const dataStr = JSON.stringify(rawData, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'railway_data_updated.json';
-    link.click();
-    URL.revokeObjectURL(url);
-    
-    alert('ファイルを保存しました！');
-}
-
-// 임시 선 업데이트
-function updateTempLine() {
-    if (currentCoordinates.length === 0) return;
-    
-    const lineColor = document.getElementById('line-color').value;
-    
-    // 기존 임시 레이어 제거
-    if (map.getLayer('temp-line')) {
-        map.removeLayer('temp-line');
-        map.removeSource('temp-line');
-    }
-    if (map.getLayer('temp-points')) {
-        map.removeLayer('temp-points');
-        map.removeSource('temp-points');
-    }
-    
-    // 임시 선 추가
-    map.addSource('temp-line', {
-        'type': 'geojson',
-        'data': {
-            'type': 'Feature',
-            'geometry': {
-                'type': 'LineString',
-                'coordinates': currentCoordinates
-            }
-        }
-    });
-    
-    map.addLayer({
-        'id': 'temp-line',
-        'type': 'line',
-        'source': 'temp-line',
-        'paint': {
-            'line-color': lineColor,
-            'line-width': 4,
-            'line-dasharray': [2, 2]
-        }
-    });
-    
-    // 임시 점 추가
-    map.addSource('temp-points', {
-        'type': 'geojson',
-        'data': {
-            'type': 'FeatureCollection',
-            'features': currentCoordinates.map(coord => ({
-                'type': 'Feature',
-                'geometry': {
-                    'type': 'Point',
-                    'coordinates': coord
-                }
-            }))
-        }
-    });
-    
-    map.addLayer({
-        'id': 'temp-points',
-        'type': 'circle',
-        'source': 'temp-points',
-        'paint': {
-            'circle-radius': 5,
-            'circle-color': lineColor,
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff'
-        }
-    });
-}
-
-map.on('load', async () => {
-    try {
-        // GeoJSON 파일 로드
-        geojsonData = await loadAndConvertGeoJSON('Arcgis_railroad_extracted.json');
-        
-        // 데이터 소스 추가
-        map.addSource('railways', {
-            'type': 'geojson',
-            'data': geojsonData
+        // 지도 초기화
+        const map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/streets-v12',
+            center: [139.8, 36.0],
+            zoom: 10
         });
 
-        // 레이어 추가
-        map.addLayer({
-            'id': 'railway-lines',
-            'type': 'line',
-            'source': 'railways',
-            'layout': {
-                'line-join': 'round',
-                'line-cap': 'round'
-            },
-            'paint': {
-                'line-color': ['get', 'color'],
-                'line-width': 3
-            }
-        });
+        map.addControl(new mapboxgl.NavigationControl());
 
-        // 클릭 이벤트 - 그리기 모드와 일반 모드 구분
-        map.on('click', (e) => {
-            if (isDrawing) {
-                // 그리기 모드: 좌표 추가
-                currentCoordinates.push([e.lngLat.lng, e.lngLat.lat]);
-                document.getElementById('coord-count').textContent = `座標数: ${currentCoordinates.length}`;
-                updateTempLine();
-            } else {
-                // 일반 모드: 선로 정보 표시
-                const features = map.queryRenderedFeatures(e.point, {
-                    layers: ['railway-lines']
+        // 레이어 시스템 (최적화: 마커 대신 circle layer 사용)
+        const layers = {
+            1: { feature: null, visible: true, color: '#667eea', selected: new Set() },
+            2: { feature: null, visible: true, color: '#f59e0b', selected: new Set() },
+            3: { feature: null, visible: true, color: '#10b981', selected: new Set() }
+        };
+        
+        let activeLayer = 1;
+        let isSelectMode = false;
+        let isAddPointMode = false;
+        let isDragging = false;
+        let dragStart = { x: 0, y: 0 };
+        let tempMarkers = [];
+        let showMarkers = true;
+
+        const examples = [
+            'LINESTRING(126.9780 37.5665, 127.0276 37.4979)',
+            'LINESTRING(127.0276 37.4979, 127.0474 37.5048, 127.0636 37.5172)',
+            'MULTILINESTRING((126.9780 37.5665, 127.0276 37.4979), (127.0474 37.5048, 127.0636 37.5172))'
+        ];
+
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = text;
+            messageEl.className = `message ${type}`;
+            messageEl.style.display = 'block';
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 3000);
+        }
+
+        function parseWKT(wkt) {
+            wkt = wkt.trim();
+            
+            if (wkt.startsWith('LINESTRING')) {
+                const coords = wkt.match(/LINESTRING\s*\(([^)]+)\)/)[1];
+                const points = coords.split(',').map(point => {
+                    const [lng, lat] = point.trim().split(/\s+/).map(Number);
+                    return [lng, lat];
                 });
+                return {
+                    type: 'Feature',
+                    geometry: { type: 'LineString', coordinates: points }
+                };
+            }
+            
+            if (wkt.startsWith('MULTILINESTRING')) {
+                const lineStrings = [];
+                const content = wkt.match(/MULTILINESTRING\s*\(\s*(.+)\s*\)/s)[1];
+                let depth = 0;
+                let currentLine = '';
                 
-                if (features.length > 0) {
-                    const properties = features[0].properties;
-                    const operatorTypeName = operatorTypeMap[properties.operatorType] || properties.operatorType;
-                    const railwayTypeName = railwayTypeMap[properties.railwayType] || properties.railwayType;
-                    
-                    new mapboxgl.Popup()
-                        .setLngLat(e.lngLat)
-                        .setHTML(`
-                            <div class="popup-title">${properties.label}</div>
-                            <div class="popup-row">
-                                <span class="popup-label">運営会社:</span> ${properties.operator}
-                            </div>
-                            <div class="popup-row">
-                                <span class="popup-label">事業者区分:</span> ${operatorTypeName}
-                            </div>
-                            <div class="popup-row">
-                                <span class="popup-label">路線種類:</span> ${railwayTypeName}
-                            </div>
-                        `)
-                        .addTo(map);
+                for (let i = 0; i < content.length; i++) {
+                    const char = content[i];
+                    if (char === '(') {
+                        depth++;
+                        if (depth === 1) continue;
+                    } else if (char === ')') {
+                        depth--;
+                        if (depth === 0) {
+                            const points = currentLine.split(',').map(point => {
+                                const [lng, lat] = point.trim().split(/\s+/).map(Number);
+                                return [lng, lat];
+                            });
+                            lineStrings.push(points);
+                            currentLine = '';
+                            continue;
+                        }
+                    }
+                    if (depth > 0) currentLine += char;
+                }
+                
+                return {
+                    type: 'Feature',
+                    geometry: { type: 'MultiLineString', coordinates: lineStrings }
+                };
+            }
+            
+            throw new Error('LINESTRING 또는 MULTILINESTRING만 지원합니다.');
+        }
+
+        function loadExampleToLayer(exampleIndex, layerNum) {
+            document.getElementById(`geomInput${layerNum}`).value = examples[exampleIndex];
+        }
+
+        function changeActiveLayer() {
+            const select = document.getElementById('activeLayerSelect');
+            activeLayer = parseInt(select.value);
+            
+            for (let i = 1; i <= 3; i++) {
+                const section = document.getElementById(`layer${i}-section`);
+                if (i === activeLayer) {
+                    section.classList.add('active');
+                } else {
+                    section.classList.remove('active');
                 }
             }
-        });
+            
+            clearSelection();
+            updatePointsLayer();
+        }
 
-        // 마우스 커서 변경
-        map.on('mouseenter', 'railway-lines', () => {
-            if (!isDrawing) {
-                map.getCanvas().style.cursor = 'pointer';
+        function toggleLayerVisibility(layerNum) {
+            const layer = layers[layerNum];
+            layer.visible = !layer.visible;
+            
+            const layerId = `route-layer-${layerNum}`;
+            if (map.getLayer(layerId)) {
+                map.setLayoutProperty(layerId, 'visibility', layer.visible ? 'visible' : 'none');
             }
-        });
-        map.on('mouseleave', 'railway-lines', () => {
-            if (!isDrawing) {
-                map.getCanvas().style.cursor = '';
-            }
-        });
+            
+            updatePointsLayer();
+        }
 
-        // 전체 노선이 보이도록 맵 조정
-        const bounds = new mapboxgl.LngLatBounds();
-        geojsonData.features.forEach(feature => {
-            feature.geometry.coordinates.forEach(line => {
-                line.forEach(coord => {
-                    bounds.extend(coord);
+        function toggleMarkersVisibility() {
+            showMarkers = document.getElementById('showMarkersToggle').checked;
+            updatePointsLayer();
+        }
+
+        function clearLayer(layerNum) {
+            const layer = layers[layerNum];
+            
+            const layerId = `route-layer-${layerNum}`;
+            if (map.getLayer(layerId)) map.removeLayer(layerId);
+            if (map.getSource(`route-${layerNum}`)) map.removeSource(`route-${layerNum}`);
+            
+            layer.selected.clear();
+            layer.feature = null;
+            
+            document.getElementById(`geomInput${layerNum}`).value = '';
+            document.getElementById(`stats${layerNum}`).textContent = '';
+            updateDeleteButton();
+            updatePointsLayer();
+            
+            if (layerNum === activeLayer && isAddPointMode) {
+                toggleAddPointMode();
+            }
+            
+            showMessage(`Layer ${layerNum} 삭제됨`, 'success');
+        }
+
+        function loadGeometry(layerNum) {
+            const geomInput = document.getElementById(`geomInput${layerNum}`).value.trim();
+            
+            if (!geomInput) {
+                showMessage('Geometry 데이터를 입력해주세요', 'error');
+                return;
+            }
+
+            try {
+                const feature = parseWKT(geomInput);
+                const layer = layers[layerNum];
+                layer.feature = feature;
+                
+                const layerId = `route-layer-${layerNum}`;
+                const sourceId = `route-${layerNum}`;
+                
+                if (map.getLayer(layerId)) map.removeLayer(layerId);
+                if (map.getSource(sourceId)) map.removeSource(sourceId);
+
+                map.addSource(sourceId, {
+                    type: 'geojson',
+                    data: feature
+                });
+
+                map.addLayer({
+                    id: layerId,
+                    type: 'line',
+                    source: sourceId,
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: {
+                        'line-color': layer.color,
+                        'line-width': 4,
+                        'line-opacity': 0.8
+                    }
+                });
+
+                updatePointsLayer();
+
+                const geometryType = feature.geometry.type;
+                let pointCount = 0, lineCount = 1;
+                
+                if (geometryType === 'LineString') {
+                    pointCount = feature.geometry.coordinates.length;
+                } else {
+                    lineCount = feature.geometry.coordinates.length;
+                    pointCount = feature.geometry.coordinates.reduce((sum, line) => sum + line.length, 0);
+                }
+                
+                document.getElementById(`stats${layerNum}`).textContent = 
+                    `${lineCount}라인, ${pointCount}포인트`;
+                
+                showMessage(`Layer ${layerNum}: ${geometryType} 로드 완료`, 'success');
+            } catch (error) {
+                showMessage(`오류: ${error.message}`, 'error');
+            }
+        }
+
+        // 최적화: 모든 포인트를 하나의 circle layer로 표시
+        function updatePointsLayer() {
+            // 기존 포인트 레이어 제거
+            if (map.getLayer('all-points-layer')) map.removeLayer('all-points-layer');
+            if (map.getLayer('selected-points-layer')) map.removeLayer('selected-points-layer');
+            if (map.getSource('all-points')) map.removeSource('all-points');
+            if (map.getSource('selected-points')) map.removeSource('selected-points');
+
+            if (!showMarkers) return;
+
+            const allPoints = [];
+            const selectedPoints = [];
+
+            [1, 2, 3].forEach(layerNum => {
+                const layer = layers[layerNum];
+                if (!layer.feature || !layer.visible) return;
+
+                const coords = layer.feature.geometry.type === 'LineString'
+                    ? layer.feature.geometry.coordinates
+                    : layer.feature.geometry.coordinates.flat();
+
+                coords.forEach((coord, idx) => {
+                    const pointFeature = {
+                        type: 'Feature',
+                        geometry: { type: 'Point', coordinates: coord },
+                        properties: {
+                            layerNum: layerNum,
+                            index: idx,
+                            color: layer.color,
+                            coords: `${coord[0].toFixed(12)}, ${coord[1].toFixed(12)}`
+                        }
+                    };
+
+                    allPoints.push(pointFeature);
+
+                    if (layerNum === activeLayer) {
+                        const key = `${idx}`;
+                        if (layer.selected.has(key)) {
+                            selectedPoints.push(pointFeature);
+                        }
+                    }
                 });
             });
+
+            if (allPoints.length > 0) {
+                map.addSource('all-points', {
+                    type: 'geojson',
+                    data: {
+                        type: 'FeatureCollection',
+                        features: allPoints
+                    }
+                });
+
+                map.addLayer({
+                    id: 'all-points-layer',
+                    type: 'circle',
+                    source: 'all-points',
+                    paint: {
+                        'circle-radius': 4,
+                        'circle-color': ['get', 'color'],
+                        'circle-stroke-width': 2,
+                        'circle-stroke-color': '#ffffff'
+                    }
+                });
+
+                // 포인트 클릭 이벤트
+                map.on('click', 'all-points-layer', (e) => {
+                    if (isAddPointMode || isSelectMode) return;
+                    
+                    const coords = e.features[0].properties.coords;
+                    navigator.clipboard.writeText(coords).then(() => {
+                        showMessage(`복사됨: ${coords}`, 'success');
+                    });
+                });
+
+                // 호버 커서
+                map.on('mouseenter', 'all-points-layer', () => {
+                    map.getCanvas().style.cursor = 'pointer';
+                });
+                map.on('mouseleave', 'all-points-layer', () => {
+                    map.getCanvas().style.cursor = '';
+                });
+            }
+
+            if (selectedPoints.length > 0) {
+                map.addSource('selected-points', {
+                    type: 'geojson',
+                    data: {
+                        type: 'FeatureCollection',
+                        features: selectedPoints
+                    }
+                });
+
+                map.addLayer({
+                    id: 'selected-points-layer',
+                    type: 'circle',
+                    source: 'selected-points',
+                    paint: {
+                        'circle-radius': 6,
+                        'circle-color': '#ff4444',
+                        'circle-stroke-width': 2,
+                        'circle-stroke-color': '#ffffff'
+                    }
+                });
+            }
+        }
+
+        function mergeLayers() {
+            const activeLayers = [1, 2, 3].filter(num => layers[num].feature !== null);
+            
+            if (activeLayers.length < 2) {
+                showMessage('최소 2개 레이어가 필요합니다', 'error');
+                return;
+            }
+            
+            const allLines = [];
+            activeLayers.forEach(num => {
+                const feature = layers[num].feature;
+                if (feature.geometry.type === 'LineString') {
+                    allLines.push(feature.geometry.coordinates);
+                } else {
+                    allLines.push(...feature.geometry.coordinates);
+                }
+            });
+            
+            const wkt = `MULTILINESTRING(${allLines.map(line => 
+                `(${line.map(c => `${c[0]} ${c[1]}`).join(', ')})`
+            ).join(', ')})`;
+            
+            document.getElementById('geomInput1').value = wkt;
+            
+            activeLayers.slice(1).forEach(num => clearLayer(num));
+            loadGeometry(1);
+            
+            showMessage(`${activeLayers.length}개 레이어가 합체됨`, 'success');
+        }
+
+        function toggleSelectMode() {
+            isSelectMode = !isSelectMode;
+            const btn = document.getElementById('selectModeBtn');
+            const mapElement = document.getElementById('map');
+            
+            if (isSelectMode) {
+                if (isAddPointMode) toggleAddPointMode();
+                
+                btn.classList.add('active');
+                btn.textContent = '선택 모드 (ON)';
+                mapElement.classList.add('select-mode');
+                
+                map.dragPan.disable();
+                map.scrollZoom.disable();
+                map.boxZoom.disable();
+                map.dragRotate.disable();
+                map.keyboard.disable();
+                map.doubleClickZoom.disable();
+                map.touchZoomRotate.disable();
+            } else {
+                btn.classList.remove('active');
+                btn.textContent = '선택 모드';
+                mapElement.classList.remove('select-mode');
+                
+                map.dragPan.enable();
+                map.scrollZoom.enable();
+                map.boxZoom.enable();
+                map.dragRotate.enable();
+                map.keyboard.enable();
+                map.doubleClickZoom.enable();
+                map.touchZoomRotate.enable();
+                clearSelection();
+            }
+        }
+
+        function toggleAddPointMode() {
+            isAddPointMode = !isAddPointMode;
+            const btn = document.getElementById('addPointModeBtn');
+            const mapElement = document.getElementById('map');
+            
+            if (isAddPointMode) {
+                if (isSelectMode) toggleSelectMode();
+                
+                btn.classList.add('active');
+                btn.textContent = '➕ 추가 모드 (ON)';
+                mapElement.classList.add('add-point-mode');
+                
+                map.dragPan.disable();
+                map.boxZoom.disable();
+                map.dragRotate.disable();
+                map.doubleClickZoom.disable();
+                
+                showMessage('지도를 클릭하여 포인트를 추가하세요', 'success');
+            } else {
+                btn.classList.remove('active');
+                btn.textContent = '➕ 포인트 추가';
+                mapElement.classList.remove('add-point-mode');
+                
+                map.dragPan.enable();
+                map.boxZoom.enable();
+                map.dragRotate.enable();
+                map.doubleClickZoom.enable();
+                
+                tempMarkers.forEach(marker => marker.remove());
+                tempMarkers = [];
+            }
+        }
+
+        function clearSelection() {
+            const layer = layers[activeLayer];
+            layer.selected.clear();
+            updateDeleteButton();
+            updatePointsLayer();
+        }
+
+        function updateDeleteButton() {
+            const deleteBtn = document.getElementById('deleteBtn');
+            const count = layers[activeLayer].selected.size;
+            deleteBtn.textContent = `선택 삭제 (${count})`;
+            deleteBtn.disabled = count === 0;
+        }
+
+        function distance(p1, p2) {
+            const dx = p1[0] - p2[0];
+            const dy = p1[1] - p2[1];
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function distanceToSegment(point, segStart, segEnd) {
+            const x = point[0], y = point[1];
+            const x1 = segStart[0], y1 = segStart[1];
+            const x2 = segEnd[0], y2 = segEnd[1];
+            
+            const A = x - x1;
+            const B = y - y1;
+            const C = x2 - x1;
+            const D = y2 - y1;
+            
+            const dot = A * C + B * D;
+            const lenSq = C * C + D * D;
+            let param = -1;
+            
+            if (lenSq != 0) param = dot / lenSq;
+            
+            let xx, yy;
+            
+            if (param < 0) {
+                xx = x1;
+                yy = y1;
+            } else if (param > 1) {
+                xx = x2;
+                yy = y2;
+            } else {
+                xx = x1 + param * C;
+                yy = y1 + param * D;
+            }
+            
+            const dx = x - xx;
+            const dy = y - yy;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function insertPointIntoLineString(coordinates, newPoint) {
+            if (coordinates.length < 2) {
+                coordinates.push(newPoint);
+                return;
+            }
+            
+            let minDistance = Infinity;
+            let insertIndex = coordinates.length;
+            
+            for (let i = 0; i < coordinates.length - 1; i++) {
+                const dist = distanceToSegment(newPoint, coordinates[i], coordinates[i + 1]);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    insertIndex = i + 1;
+                }
+            }
+            
+            coordinates.splice(insertIndex, 0, newPoint);
+        }
+
+        // 지도 클릭으로 포인트 추가
+        map.on('click', (e) => {
+            if (!isAddPointMode) return;
+            
+            const layer = layers[activeLayer];
+            if (!layer.feature) {
+                showMessage('먼저 레이어에 geometry를 로드하세요', 'error');
+                return;
+            }
+            
+            const lngLat = e.lngLat;
+            const newPoint = [lngLat.lng, lngLat.lat];
+            
+            const el = document.createElement('div');
+            el.className = 'temp-point-marker';
+            el.style.background = layer.color;
+            const tempMarker = new mapboxgl.Marker({ element: el })
+                .setLngLat(newPoint)
+                .addTo(map);
+            tempMarkers.push(tempMarker);
+            
+            if (layer.feature.geometry.type === 'LineString') {
+                insertPointIntoLineString(layer.feature.geometry.coordinates, newPoint);
+            } else if (layer.feature.geometry.type === 'MultiLineString') {
+                let minDistance = Infinity;
+                let targetLineIndex = 0;
+                let targetSegmentIndex = 0;
+                
+                layer.feature.geometry.coordinates.forEach((line, lineIdx) => {
+                    for (let i = 0; i < line.length - 1; i++) {
+                        const dist = distanceToSegment(newPoint, line[i], line[i + 1]);
+                        if (dist < minDistance) {
+                            minDistance = dist;
+                            targetLineIndex = lineIdx;
+                            targetSegmentIndex = i;
+                        }
+                    }
+                });
+                
+                layer.feature.geometry.coordinates[targetLineIndex].splice(targetSegmentIndex + 1, 0, newPoint);
+            }
+            
+            if (map.getSource(`route-${activeLayer}`)) {
+                map.getSource(`route-${activeLayer}`).setData(layer.feature);
+            }
+            
+            updatePointsLayer();
+            updateWKTInput(activeLayer);
+            updateStats(activeLayer);
+            
+            showMessage(`포인트 추가됨`, 'success');
         });
-        map.fitBounds(bounds, { padding: 50 });
+
+        function deleteSelectedPoints() {
+            const layer = layers[activeLayer];
+            if (layer.selected.size === 0 || !layer.feature) return;
+
+            const splitLine = document.getElementById('splitLineToggle').checked;
+            const selectedIndices = Array.from(layer.selected).map(key => parseInt(key)).sort((a, b) => a - b);
+
+            if (layer.feature.geometry.type === 'LineString') {
+                const coords = layer.feature.geometry.coordinates;
+                
+                if (splitLine) {
+                    // 라인을 분리하는 방식
+                    const newLines = [];
+                    let currentLine = [];
+                    
+                    for (let i = 0; i < coords.length; i++) {
+                        if (selectedIndices.includes(i)) {
+                            // 삭제할 포인트 - 현재 라인을 저장하고 새 라인 시작
+                            if (currentLine.length > 1) {
+                                newLines.push([...currentLine]);
+                            }
+                            currentLine = [];
+                        } else {
+                            currentLine.push(coords[i]);
+                        }
+                    }
+                    
+                    // 마지막 라인 저장
+                    if (currentLine.length > 1) {
+                        newLines.push(currentLine);
+                    }
+                    
+                    // MULTILINESTRING으로 변환
+                    if (newLines.length === 0) {
+                        showMessage('모든 포인트를 삭제할 수 없습니다', 'error');
+                        return;
+                    } else if (newLines.length === 1) {
+                        layer.feature.geometry.coordinates = newLines[0];
+                    } else {
+                        layer.feature.geometry.type = 'MultiLineString';
+                        layer.feature.geometry.coordinates = newLines;
+                    }
+                } else {
+                    // 단순히 포인트만 삭제 (연결 유지)
+                    selectedIndices.reverse().forEach(idx => {
+                        coords.splice(idx, 1);
+                    });
+                    
+                    if (coords.length < 2) {
+                        showMessage('최소 2개의 포인트가 필요합니다', 'error');
+                        return;
+                    }
+                }
+            } else if (layer.feature.geometry.type === 'MultiLineString') {
+                // 전체 좌표를 flat하게 만들고 인덱스 매핑
+                let flatIndex = 0;
+                const lineMapping = [];
+                
+                layer.feature.geometry.coordinates.forEach((line, lineIdx) => {
+                    line.forEach((coord, pointIdx) => {
+                        lineMapping.push({ lineIdx, pointIdx, flatIndex });
+                        flatIndex++;
+                    });
+                });
+                
+                if (splitLine) {
+                    // 각 라인별로 처리
+                    const newLines = [];
+                    
+                    layer.feature.geometry.coordinates.forEach((line, lineIdx) => {
+                        const lineSelectedIndices = [];
+                        
+                        lineMapping.forEach(mapping => {
+                            if (mapping.lineIdx === lineIdx && selectedIndices.includes(mapping.flatIndex)) {
+                                lineSelectedIndices.push(mapping.pointIdx);
+                            }
+                        });
+                        
+                        if (lineSelectedIndices.length === 0) {
+                            // 이 라인에서 삭제할 포인트가 없으면 그대로 유지
+                            newLines.push([...line]);
+                        } else {
+                            // 이 라인을 분리
+                            let currentLine = [];
+                            
+                            for (let i = 0; i < line.length; i++) {
+                                if (lineSelectedIndices.includes(i)) {
+                                    if (currentLine.length > 1) {
+                                        newLines.push([...currentLine]);
+                                    }
+                                    currentLine = [];
+                                } else {
+                                    currentLine.push(line[i]);
+                                }
+                            }
+                            
+                            if (currentLine.length > 1) {
+                                newLines.push(currentLine);
+                            }
+                        }
+                    });
+                    
+                    if (newLines.length === 0) {
+                        showMessage('모든 포인트를 삭제할 수 없습니다', 'error');
+                        return;
+                    }
+                    
+                    layer.feature.geometry.coordinates = newLines;
+                } else {
+                    // 단순히 포인트만 삭제
+                    const toDelete = new Set(selectedIndices);
+                    const newLines = [];
+                    
+                    let currentFlatIndex = 0;
+                    layer.feature.geometry.coordinates.forEach(line => {
+                        const newLine = [];
+                        line.forEach(coord => {
+                            if (!toDelete.has(currentFlatIndex)) {
+                                newLine.push(coord);
+                            }
+                            currentFlatIndex++;
+                        });
+                        if (newLine.length > 1) {
+                            newLines.push(newLine);
+                        }
+                    });
+                    
+                    if (newLines.length === 0) {
+                        showMessage('최소 2개의 포인트가 필요합니다', 'error');
+                        return;
+                    }
+                    
+                    layer.feature.geometry.coordinates = newLines;
+                }
+            }
+
+            if (map.getSource(`route-${activeLayer}`)) {
+                map.getSource(`route-${activeLayer}`).setData(layer.feature);
+            }
+
+            const deletedCount = selectedIndices.length;
+            clearSelection();
+            updatePointsLayer();
+            updateWKTInput(activeLayer);
+            updateStats(activeLayer);
+
+            const message = splitLine 
+                ? `${deletedCount}개 포인트 삭제 + 라인 분리됨`
+                : `${deletedCount}개 포인트 삭제됨 (연결 유지)`;
+            showMessage(message, 'success');
+        }
+
+        function updateWKTInput(layerNum) {
+            const feature = layers[layerNum].feature;
+            let wkt = '';
+            
+            if (feature.geometry.type === 'LineString') {
+                const coords = feature.geometry.coordinates.map(c => `${c[0]} ${c[1]}`).join(', ');
+                wkt = `LINESTRING(${coords})`;
+            } else {
+                const lines = feature.geometry.coordinates.map(line => {
+                    const coords = line.map(c => `${c[0]} ${c[1]}`).join(', ');
+                    return `(${coords})`;
+                }).join(', ');
+                wkt = `MULTILINESTRING(${lines})`;
+            }
+            
+            document.getElementById(`geomInput${layerNum}`).value = wkt;
+        }
+
+        function updateStats(layerNum) {
+            const feature = layers[layerNum].feature;
+            if (!feature) return;
+
+            const geometryType = feature.geometry.type;
+            let pointCount = 0, lineCount = 1;
+            
+            if (geometryType === 'LineString') {
+                pointCount = feature.geometry.coordinates.length;
+            } else {
+                lineCount = feature.geometry.coordinates.length;
+                pointCount = feature.geometry.coordinates.reduce((sum, line) => sum + line.length, 0);
+            }
+            
+            document.getElementById(`stats${layerNum}`).textContent = 
+                `${lineCount}라인, ${pointCount}포인트`;
+        }
+
+        // 자동 연결 함수 - Nearest Neighbor 알고리즘
+        function autoConnectPoints(layerNum) {
+            const layer = layers[layerNum];
+            if (!layer.feature) {
+                showMessage('먼저 레이어에 geometry를 로드하세요', 'error');
+                return;
+            }
+
+            // 모든 포인트를 추출
+            let allPoints = [];
+            if (layer.feature.geometry.type === 'LineString') {
+                allPoints = [...layer.feature.geometry.coordinates];
+            } else {
+                layer.feature.geometry.coordinates.forEach(line => {
+                    allPoints.push(...line);
+                });
+            }
+
+            if (allPoints.length < 2) {
+                showMessage('최소 2개의 포인트가 필요합니다', 'error');
+                return;
+            }
+
+            // Nearest Neighbor로 정렬
+            const sortedPoints = nearestNeighborSort(allPoints);
+
+            // LINESTRING으로 변환
+            layer.feature.geometry.type = 'LineString';
+            layer.feature.geometry.coordinates = sortedPoints;
+
+            // 지도 업데이트
+            if (map.getSource(`route-${layerNum}`)) {
+                map.getSource(`route-${layerNum}`).setData(layer.feature);
+            }
+
+            updatePointsLayer();
+            updateWKTInput(layerNum);
+            updateStats(layerNum);
+
+            showMessage(`Layer ${layerNum}: ${allPoints.length}개 포인트가 자동 연결됨`, 'success');
+        }
+
+        // Nearest Neighbor 정렬 알고리즘
+        function nearestNeighborSort(points) {
+            if (points.length === 0) return [];
+            
+            const result = [];
+            const remaining = [...points];
+            
+            // 첫 번째 포인트를 시작점으로
+            let current = remaining.shift();
+            result.push(current);
+            
+            // 가장 가까운 포인트를 반복적으로 찾기
+            while (remaining.length > 0) {
+                let minDist = Infinity;
+                let minIndex = 0;
+                
+                for (let i = 0; i < remaining.length; i++) {
+                    const dist = distance(current, remaining[i]);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        minIndex = i;
+                    }
+                }
+                
+                current = remaining.splice(minIndex, 1)[0];
+                result.push(current);
+            }
+            
+            return result;
+        }
+
+        // 드래그 선택 (최적화: queryRenderedFeatures 사용)
+        const mapContainer = map.getContainer();
         
-    } catch (error) {
-        console.error('GeoJSON 로드 실패:', error);
-    }
-});
-</script>
+        mapContainer.addEventListener('mousedown', (e) => {
+            if (!isSelectMode) return;
+            if (e.target.closest('.map-controls')) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+
+            isDragging = true;
+            const rect = mapContainer.getBoundingClientRect();
+            dragStart = { 
+                x: e.clientX - rect.left, 
+                y: e.clientY - rect.top,
+                screenX: e.clientX,
+                screenY: e.clientY
+            };
+
+            const selectionBox = document.getElementById('selectionBox');
+            selectionBox.style.left = e.clientX + 'px';
+            selectionBox.style.top = e.clientY + 'px';
+            selectionBox.style.width = '0px';
+            selectionBox.style.height = '0px';
+            selectionBox.style.display = 'block';
+        }, true);
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging || !isSelectMode) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+
+            const selectionBox = document.getElementById('selectionBox');
+            const width = Math.abs(e.clientX - dragStart.screenX);
+            const height = Math.abs(e.clientY - dragStart.screenY);
+            const left = Math.min(e.clientX, dragStart.screenX);
+            const top = Math.min(e.clientY, dragStart.screenY);
+
+            selectionBox.style.width = width + 'px';
+            selectionBox.style.height = height + 'px';
+            selectionBox.style.left = left + 'px';
+            selectionBox.style.top = top + 'px';
+        });
+
+        document.addEventListener('mouseup', (e) => {
+            if (!isDragging || !isSelectMode) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+
+            const selectionBox = document.getElementById('selectionBox');
+            selectionBox.style.display = 'none';
+
+            const width = Math.abs(e.clientX - dragStart.screenX);
+            const height = Math.abs(e.clientY - dragStart.screenY);
+            
+            if (width > 3 || height > 3) {
+                const rect = mapContainer.getBoundingClientRect();
+                const x1 = Math.min(dragStart.x, e.clientX - rect.left);
+                const y1 = Math.min(dragStart.y, e.clientY - rect.top);
+                const x2 = Math.max(dragStart.x, e.clientX - rect.left);
+                const y2 = Math.max(dragStart.y, e.clientY - rect.top);
+
+                const layer = layers[activeLayer];
+
+                if (!e.shiftKey) {
+                    layer.selected.clear();
+                }
+
+                // 최적화: queryRenderedFeatures 사용
+                const features = map.queryRenderedFeatures(
+                    [[x1, y1], [x2, y2]],
+                    { layers: ['all-points-layer'] }
+                );
+
+                features.forEach(feature => {
+                    if (feature.properties.layerNum === activeLayer) {
+                        layer.selected.add(feature.properties.index.toString());
+                    }
+                });
+
+                updateDeleteButton();
+                updatePointsLayer();
+            }
+
+            isDragging = false;
+        });
+    </script>
 </body>
 </html>
